@@ -1,6 +1,8 @@
-# Clip Studio Paint — Web Studio Workspace
+# Art Draw Studio Paint — Web Studio Workspace
 
 A professional digital drawing and painting studio built with **React 19**, **TypeScript**, **Tailwind CSS**, and high-performance **HTML5 Canvas** engines. Designed to bring desktop-grade illustration workflows—customizable brush physics, dual-brush textures, stroke stabilization, multi-layer compositing, vector lineart, and Wacom/Apple Pencil hardware pressure sensitivity—directly to the modern web browser.
+
+![Art Draw Studio Paint Screenshot](./public/assets/artdrawstudio_screenshot.jpg)
 
 ---
 
@@ -108,8 +110,8 @@ npm -v
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/clip-studio-paint.git
-   cd clip-studio-paint
+   git clone https://github.com/tgoeminne/artdrawstudio.git
+   cd artdrawstudio
    ```
 
 2. **Install dependencies:**
