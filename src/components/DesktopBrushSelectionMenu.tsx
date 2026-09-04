@@ -303,7 +303,7 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
         </div>
       </div>
 
-      {/* 3. Category Tabs (Clip Studio Paint Style) */}
+      {/* 3. Category Tabs (Art Draw Studio Style) */}
       <div className="bg-[#262626] border-b border-black flex items-center px-1 gap-1 text-[11px] overflow-x-auto no-scrollbar py-1">
         {categories.map((cat) => {
           const isActive = activeCategory === cat.id;

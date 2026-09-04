@@ -107,7 +107,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
       <input
         ref={projectInputRef}
         type="file"
-        accept=".csp.json,application/json"
+        accept=".ads.json,.json,application/json"
         className="hidden"
         onChange={handleProjectFileChange}
       />
@@ -122,9 +122,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
       <div className="flex gap-4 items-center">
         <span className="text-white font-bold tracking-wider flex items-center gap-1.5 cursor-pointer">
           <span className="w-3.5 h-3.5 bg-[#4a90e2] rounded flex items-center justify-center text-[9px] text-white font-extrabold">
-            C
+            A
           </span>
-          STUDIO PAINT PRO
+          ART DRAW STUDIO
         </span>
 
         {/* Menu Dropdowns */}
@@ -157,14 +157,14 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 onClick={() => { onSaveProject(); setActiveMenu(null); }}
                 className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
               >
-                <span className="flex items-center gap-2"><Download size={13} /> Save Project (.csp)...</span>
+                <span className="flex items-center gap-2"><Download size={13} /> Save Project (.ads)...</span>
                 <span className="text-[9px] text-gray-400">Ctrl+S</span>
               </button>
               <button
                 onClick={() => { projectInputRef.current?.click(); }}
                 className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
               >
-                <span className="flex items-center gap-2"><Upload size={13} /> Open Project (.csp)...</span>
+                <span className="flex items-center gap-2"><Upload size={13} /> Open Project (.ads)...</span>
               </button>
               <div className="h-[1px] bg-[#3a3a3a] my-1" />
               <button

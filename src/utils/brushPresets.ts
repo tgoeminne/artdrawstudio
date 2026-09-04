@@ -1,7 +1,7 @@
 import { BrushSettings } from '../types';
 
 export const DEFAULT_BRUSH_PRESETS: BrushSettings[] = [
-  // --- Clip Studio Paint [Watercolor] Sub Tools ---
+  // --- Art Draw Studio [Watercolor] Sub Tools ---
   {
     id: 'opaque-watercolor',
     name: 'Opaque watercolor',
@@ -232,7 +232,7 @@ export const DEFAULT_BRUSH_PRESETS: BrushSettings[] = [
     jitter: 0.02,
   },
 
-  // --- Clip Studio Paint [India Ink & Pens] ---
+  // --- Art Draw Studio [India Ink & Pens] ---
   {
     id: 'g-pen',
     name: 'G-Pen',
@@ -310,7 +310,7 @@ export const DEFAULT_BRUSH_PRESETS: BrushSettings[] = [
     jitter: 0,
   },
 
-  // --- Clip Studio Paint [Pencil] Sub Tools ---
+  // --- Art Draw Studio [Pencil] Sub Tools ---
   {
     id: 'pencil-rough',
     name: 'Rough Pencil',
@@ -366,7 +366,7 @@ export const DEFAULT_BRUSH_PRESETS: BrushSettings[] = [
     jitter: 0.08,
   },
 
-  // --- Clip Studio Paint [Thick Paint & Realistic] ---
+  // --- Art Draw Studio [Thick Paint & Realistic] ---
   {
     id: 'oil-paint',
     name: 'Thick Oil Paint',
@@ -416,7 +416,7 @@ export const DEFAULT_BRUSH_PRESETS: BrushSettings[] = [
     jitter: 0.04,
   },
 
-  // --- Clip Studio Paint [Airbrush] ---
+  // --- Art Draw Studio [Airbrush] ---
   {
     id: 'airbrush-soft',
     name: 'Soft Airbrush',

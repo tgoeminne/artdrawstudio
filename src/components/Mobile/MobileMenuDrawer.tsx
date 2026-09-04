@@ -57,10 +57,10 @@ export const MobileMenuDrawer: React.FC<MobileMenuDrawerProps> = ({
         <div className="p-4 border-b border-[#303030] flex items-center justify-between bg-[#262626]">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-md bg-[#4a90e2] flex items-center justify-center font-black text-xs text-white">
-              CSP
+              ADS
             </div>
             <div>
-              <div className="font-bold text-xs text-white">Clip Studio Paint</div>
+              <div className="font-bold text-xs text-white">Art Draw Studio</div>
               <div className="text-[10px] text-gray-400">Mobile Edition</div>
             </div>
           </div>
@@ -76,7 +76,7 @@ export const MobileMenuDrawer: React.FC<MobileMenuDrawerProps> = ({
         <input
           type="file"
           ref={projectInputRef}
-          accept=".json,.csp.json"
+          accept=".json,.ads.json"
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -126,7 +126,7 @@ export const MobileMenuDrawer: React.FC<MobileMenuDrawerProps> = ({
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-[#282828] active:bg-[#383838] text-gray-200"
             >
               <Save size={16} className="text-emerald-400" />
-              <span>Save Project (.csp.json)</span>
+              <span>Save Project (.ads.json)</span>
             </button>
 
             <button

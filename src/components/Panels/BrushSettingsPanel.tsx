@@ -210,12 +210,12 @@ export const BrushSettingsPanel: React.FC<BrushSettingsPanelProps> = ({
           />
         </div>
 
-        {/* Stabilization / Line Smoothing (Clip Studio Paint signature) */}
+        {/* Stabilization / Line Smoothing (Art Draw Studio signature) */}
         <div className="flex flex-col gap-0.5">
           <div className="flex justify-between items-center text-[10px]">
             <span className="text-gray-300 flex items-center gap-1">
               Stabilization
-              <span className="text-[8px] px-1 bg-[#1a1a1a] text-blue-400 rounded">CSP</span>
+              <span className="text-[8px] px-1 bg-[#1a1a1a] text-blue-400 rounded">ADS</span>
             </span>
             <span className="text-[#4a90e2] font-mono text-[9px] font-bold">{brush.stabilization}</span>
           </div>

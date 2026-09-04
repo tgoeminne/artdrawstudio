@@ -76,7 +76,7 @@ export default function App() {
   const [canvasWidth, setCanvasWidth] = useState(1200);
   const [canvasHeight, setCanvasHeight] = useState(900);
   const [canvasBgColor, setCanvasBgColor] = useState('#ffffff');
-  const [canvasName, setCanvasName] = useState('Canvas_01.csp');
+  const [canvasName, setCanvasName] = useState('Canvas_01.ads');
   const [isModified, setIsModified] = useState(false);
 
   // Transform (pan, zoom, rotation, flip)
@@ -130,7 +130,7 @@ export default function App() {
   // Touch & Stylus Calibration Settings (Persisted in localStorage)
   const [touchSettings, setTouchSettings] = useState<TouchCalibrationSettings>(() => {
     try {
-      const saved = localStorage.getItem('csp_touch_calibration');
+      const saved = localStorage.getItem('ads_touch_calibration');
       if (saved) return JSON.parse(saved);
     } catch {}
     return {
@@ -149,7 +149,7 @@ export default function App() {
     setTouchSettings((prev) => {
       const next = { ...prev, ...updates };
       try {
-        localStorage.setItem('csp_touch_calibration', JSON.stringify(next));
+        localStorage.setItem('ads_touch_calibration', JSON.stringify(next));
       } catch {}
       return next;
     });
@@ -264,10 +264,10 @@ export default function App() {
     vCtx.arc(600, 470, 28, 0.2, Math.PI - 0.2);
     vCtx.stroke();
 
-    // Clip Studio Paint Pro logo watermark in corner
+    // Art Draw Studio logo watermark in corner
     vCtx.fillStyle = '#4a90e2';
     vCtx.font = 'bold 24px sans-serif';
-    vCtx.fillText('CLIP STUDIO PAINT', 470, 560);
+    vCtx.fillText('ART DRAW STUDIO', 470, 560);
     vCtx.fillStyle = '#888888';
     vCtx.font = '14px sans-serif';
     vCtx.fillText('Customizable Brush Engines & Multi-Layer Workspace', 415, 590);
@@ -678,7 +678,7 @@ export default function App() {
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.download = `${canvasName.replace(/\.[^/.]+$/, '')}.csp.json`;
+    link.download = `${canvasName.replace(/\.[^/.]+$/, '')}.ads.json`;
     link.href = url;
     link.click();
     URL.revokeObjectURL(url);
@@ -930,7 +930,7 @@ export default function App() {
 
   return (
     <div
-      id="clip-studio-paint-app"
+      id="art-draw-studio-app"
       className="h-screen w-screen flex flex-col bg-[#121212] text-[#d1d1d1] font-sans overflow-hidden select-none"
     >
       {effectiveIsMobile ? (

@@ -132,9 +132,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="flex-1" />
 
-      {/* CSP Signature Color Switcher & Transparent Color Block */}
+      {/* Color Switcher & Transparent Color Block */}
       <div className="flex flex-col items-center gap-1.5 pb-2">
-        {/* Transparent Color Slot (Signature Clip Studio Paint feature) */}
+        {/* Transparent Color Slot (Signature Art Draw Studio feature) */}
         <button
           id="btn-transparent-mode"
           onClick={onToggleTransparentMode}

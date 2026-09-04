@@ -5,12 +5,12 @@ interface BrushStrokePreviewProps {
   brush: BrushSettings;
   width?: number;
   height?: number;
-  strokeColor?: string; // default white like authentic Clip Studio Paint
+  strokeColor?: string; // default white
   className?: string;
 }
 
 /**
- * Renders an authentic Clip Studio Paint style S-curve stroke preview
+ * Renders an authentic Art Draw Studio style S-curve stroke preview
  * displaying the brush's real tip shape, hardness, opacity, stipple/bristles,
  * and pressure taper.
  */
@@ -55,7 +55,7 @@ export const BrushStrokePreview: React.FC<BrushStrokePreviewProps> = ({
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const x = startX + t * (endX - startX);
-      // Double wave S-curve matching Clip Studio Paint Sub Tool preview
+      // Double wave S-curve matching Sub Tool preview
       const y = centerY - Math.sin(t * Math.PI * 2) * curveAmp;
 
       // Tangent angle

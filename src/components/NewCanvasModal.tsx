@@ -22,7 +22,7 @@ export const NewCanvasModal: React.FC<NewCanvasModalProps> = ({
 }) => {
   const [width, setWidth] = useState(1200);
   const [height, setHeight] = useState(900);
-  const [name, setName] = useState('Illustration_01.csp');
+  const [name, setName] = useState('Illustration_01.ads');
   const [bgColor, setBgColor] = useState<'white' | 'transparent'>('white');
 
   if (!isOpen) return null;
@@ -32,7 +32,7 @@ export const NewCanvasModal: React.FC<NewCanvasModalProps> = ({
       <div className="w-[92vw] max-w-[420px] max-h-[90vh] bg-[#2d2d2d] border border-black shadow-2xl rounded text-[#d1d1d1] text-[11px] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="h-7 bg-[#363636] border-b border-black flex items-center justify-between px-3 font-bold text-white text-[11px]">
-          <span>New Canvas (Clip Studio Paint)</span>
+          <span>New Canvas (Art Draw Studio)</span>
           <button onClick={onClose} className="hover:text-red-400">
             <X size={14} />
           </button>

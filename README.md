@@ -1,8 +1,8 @@
-# Art Draw Studio Paint — Web Studio Workspace
+# Art Draw Studio — Web Studio Workspace
 
 A professional digital drawing and painting studio built with **React 19**, **TypeScript**, **Tailwind CSS**, and high-performance **HTML5 Canvas** engines. Designed to bring desktop-grade illustration workflows—customizable brush physics, dual-brush textures, stroke stabilization, multi-layer compositing, vector lineart, and Wacom/Apple Pencil hardware pressure sensitivity—directly to the modern web browser.
 
-![Art Draw Studio Paint Screenshot](./public/assets/artdrawstudio_screenshot.png)
+![Art Draw Studio Screenshot](./public/assets/artdrawstudio_screenshot.png)
 
 ---
 
@@ -10,7 +10,7 @@ A professional digital drawing and painting studio built with **React 19**, **Ty
 
 ### 🖌️ Professional Brush & Dynamics Engine
 * **5 Brush Tip Shapes**: Round, Chisel, Calligraphy, Stipple (Grain/Texture), and Flat.
-* **Stroke Stabilization (0–30 Levels)**: Clip Studio Paint-style lazy-mouse stabilizer with weighted average smoothing for crisp, jitter-free lineart.
+* **Stroke Stabilization (0–30 Levels)**: Art Draw Studio lazy-mouse stabilizer with weighted average smoothing for crisp, jitter-free lineart.
 * **Smart Hand-Tremor Correction**: Real-time velocity-weighted Bezier curve smoothing for natural line confidence.
 * **Dynamic Lead-in / Lead-out Tapering**: Simulates authentic pen stroke pressure taper when lifting or placing the stylus.
 * **Dual-Brush Texture Engine**: Layer a secondary textured tip (stipple, chisel, calligraphy) over your primary stroke with customizable blend modes (*Multiply*, *Overlay*, *Screen*, *Color Dodge*, *Darken*, *Composite*), spacing, and texture intensity.

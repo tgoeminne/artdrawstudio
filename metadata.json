@@ -1,5 +1,5 @@
 {
-  "name": "Clip Studio Paint",
+  "name": "Art Draw Studio",
   "description": "Professional drawing workspace featuring customizable brush engines, multi-layer canvas, stabilizer, HSV color wheel, and art studio tools.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

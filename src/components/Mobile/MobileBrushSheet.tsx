@@ -40,7 +40,7 @@ export const MobileBrushSheet: React.FC<MobileBrushSheetProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'subtools' | 'settings'>('subtools');
   const [category, setCategory] = useState<SubToolCategory>('watercolor');
-  const [previewColorMode, setPreviewColorMode] = useState<'csp-white' | 'current-color'>('csp-white');
+  const [previewColorMode, setPreviewColorMode] = useState<'ads-white' | 'current-color'>('ads-white');
 
   const filteredPresets =
     category === 'all'
@@ -184,8 +184,8 @@ export const MobileBrushSheet: React.FC<MobileBrushSheetProps> = ({
 
         {activeTab === 'subtools' ? (
           <>
-            {/* ================= 3. CSP SUB-TOOL GROUP TABS ================= */}
-            {/* Matching [Watercolor] [Realistic] [Thick paint] [India ink] in user's image */}
+            {/* ================= 3. SUB-TOOL GROUP TABS ================= */}
+            {/* Matching [Watercolor] [Realistic] [Thick paint] [India ink] */}
             <div className="flex gap-1 overflow-x-auto no-scrollbar border-b border-black/40 pb-1">
               {categories.map((cat) => (
                 <button
@@ -210,21 +210,20 @@ export const MobileBrushSheet: React.FC<MobileBrushSheetProps> = ({
               <button
                 onClick={() =>
                   setPreviewColorMode(
-                    previewColorMode === 'csp-white' ? 'current-color' : 'csp-white'
+                    previewColorMode === 'ads-white' ? 'current-color' : 'ads-white'
                   )
                 }
                 className="flex items-center gap-1 text-gray-400 hover:text-white"
-                title="Toggle preview color: CSP default white or active color"
+                title="Toggle preview color: default white or active color"
               >
                 <Palette size={11} />
                 <span>
-                  {previewColorMode === 'csp-white' ? 'White Preview' : 'Color Preview'}
+                  {previewColorMode === 'ads-white' ? 'White Preview' : 'Color Preview'}
                 </span>
               </button>
             </div>
 
-            {/* ================= 4. AUTHENTIC CSP SUB-TOOL BRUSH LIST ================= */}
-            {/* Exactly replicates the list in the user's reference image */}
+            {/* ================= 4. SUB-TOOL BRUSH LIST ================= */}
             <div className="flex flex-col gap-1 overflow-y-auto max-h-[42vh] pr-0.5 no-scrollbar rounded-xl border border-white/5 bg-[#1a1a1a] p-1">
               {filteredPresets.map((p) => {
                 const isSelected = brush.name === p.name;
@@ -278,9 +277,9 @@ export const MobileBrushSheet: React.FC<MobileBrushSheetProps> = ({
               })}
             </div>
 
-            {/* Bottom Subtool Action Toolbar (as in CSP bottom panel) */}
+            {/* Bottom Subtool Action Toolbar */}
             <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[11px] text-gray-400">
-              <span className="text-[10px] text-gray-400">Clip Studio Paint Sub Tool System</span>
+              <span className="text-[10px] text-gray-400">Art Draw Studio Sub Tool System</span>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => {
@@ -304,7 +303,7 @@ export const MobileBrushSheet: React.FC<MobileBrushSheetProps> = ({
               <div className="flex justify-between items-center text-xs">
                 <span className="font-bold text-gray-200 flex items-center gap-1.5">
                   <Sparkles size={14} className="text-cyan-400" />
-                  Stabilization (CSP Smoothing)
+                  Stabilization (Smoothing)
                 </span>
                 <span className="font-mono text-cyan-400 font-bold">
                   {brush.stabilization} / 30

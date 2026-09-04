@@ -65,7 +65,7 @@ export const MobileTopBar: React.FC<MobileTopBarProps> = ({
             )}
           </div>
           <span className="text-[9px] text-gray-400 font-mono">
-            CSP • {Math.round(zoom * 100)}%
+            ADS • {Math.round(zoom * 100)}%
           </span>
         </div>
       </div>

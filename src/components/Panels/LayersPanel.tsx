@@ -123,7 +123,7 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
         </div>
       </div>
 
-      {/* Layers List (Rendered from top layer to bottom layer, matching CSP visual order) */}
+      {/* Layers List (Rendered from top layer to bottom layer) */}
       <div className="flex-1 overflow-y-auto p-1 flex flex-col gap-1 bg-[#202020] no-scrollbar">
         {[...layers].reverse().map((layer, reverseIndex) => {
           const actualIndex = layers.length - 1 - reverseIndex;
@@ -236,7 +236,7 @@ export const LayersPanel: React.FC<LayersPanelProps> = ({
         })}
       </div>
 
-      {/* Vector Layer Dedicated Action Bar (Clip Studio Paint Vector tools) */}
+      {/* Vector Layer Dedicated Action Bar (Vector tools) */}
       {activeLayer?.type === 'vector' && (
         <div className="bg-[#1b2533] border-t border-blue-900/60 p-1.5 flex flex-col gap-1 text-[9px] text-gray-200">
           <div className="flex items-center justify-between font-semibold text-cyan-300">
