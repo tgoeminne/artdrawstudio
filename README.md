@@ -2,7 +2,7 @@
 
 A professional digital drawing and painting studio built with **React 19**, **TypeScript**, **Tailwind CSS**, and high-performance **HTML5 Canvas** engines. Designed to bring desktop-grade illustration workflows—customizable brush physics, dual-brush textures, stroke stabilization, multi-layer compositing, vector lineart, and Wacom/Apple Pencil hardware pressure sensitivity—directly to the modern web browser.
 
-![Art Draw Studio Paint Screenshot](./public/assets/artdrawstudio_screenshot.jpg)
+![Art Draw Studio Paint Screenshot](./public/assets/artdrawstudio_screenshot.png)
 
 ---
 
