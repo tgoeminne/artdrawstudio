@@ -103,112 +103,9 @@ function cloneLayers(sourceLayers: Layer[]): Layer[] {
   });
 }
 
-function createInitialDemoDocument(): CanvasDocument {
+function createInitialDocument(): CanvasDocument {
   const bgLayer = createLayerObject('layer-bg', 'Paper Background', 1200, 900, '#ffffff');
-  const sketchLayer = createLayerObject('layer-sketch', 'Sketch Reference', 1200, 900);
-  const vectorLayer = createLayerObject('layer-vector', 'Vector Lineart (Scalable)', 1200, 900, undefined, 'vector');
-  const colorLayer = createLayerObject('layer-color', 'Highlights & Color', 1200, 900);
-
-  // Draw initial sample art on the sketch layer
-  const sCtx = sketchLayer.ctx;
-  sCtx.save();
-  sCtx.strokeStyle = 'rgba(74, 144, 226, 0.45)';
-  sCtx.lineWidth = 3;
-  sCtx.lineCap = 'round';
-  sCtx.beginPath();
-  sCtx.arc(600, 420, 160, 0, Math.PI * 2);
-  sCtx.stroke();
-  sCtx.beginPath();
-  sCtx.moveTo(600, 240);
-  sCtx.lineTo(600, 600);
-  sCtx.moveTo(430, 430);
-  sCtx.lineTo(770, 430);
-  sCtx.stroke();
-  sCtx.restore();
-
-  // Populate vectorLayer with initial crisp vector strokes
-  const sampleVectorStroke1: VectorStroke = {
-    id: 'v-stroke-eye-1',
-    points: [
-      { x: 520, y: 420, pressure: 0.5 },
-      { x: 540, y: 395, pressure: 0.9 },
-      { x: 570, y: 395, pressure: 0.9 },
-      { x: 590, y: 420, pressure: 0.4 },
-    ],
-    color: '#1e293b',
-    isEraser: false,
-    timestamp: 0,
-    brush: {
-      id: 'g-pen',
-      name: 'G-Pen',
-      category: 'ink',
-      size: 6,
-      opacity: 1,
-      flow: 1,
-      hardness: 1,
-      spacing: 0.05,
-      stabilization: 15,
-      tipShape: 'round',
-      angle: 0,
-      pressureSize: true,
-      pressureOpacity: false,
-      mixGroundColor: false,
-      colorMixRatio: 0,
-      jitter: 0,
-    },
-  };
-
-  const sampleVectorStroke2: VectorStroke = {
-    id: 'v-stroke-eye-2',
-    points: [
-      { x: 610, y: 420, pressure: 0.4 },
-      { x: 630, y: 395, pressure: 0.9 },
-      { x: 660, y: 395, pressure: 0.9 },
-      { x: 680, y: 420, pressure: 0.5 },
-    ],
-    color: '#1e293b',
-    isEraser: false,
-    timestamp: 0,
-    brush: {
-      id: 'g-pen',
-      name: 'G-Pen',
-      category: 'ink',
-      size: 6,
-      opacity: 1,
-      flow: 1,
-      hardness: 1,
-      spacing: 0.05,
-      stabilization: 15,
-      tipShape: 'round',
-      angle: 0,
-      pressureSize: true,
-      pressureOpacity: false,
-      mixGroundColor: false,
-      colorMixRatio: 0,
-      jitter: 0,
-    },
-  };
-
-  vectorLayer.vectorStrokes = [sampleVectorStroke1, sampleVectorStroke2];
-  reRenderVectorLayer(vectorLayer);
-
-  const vCtx = vectorLayer.ctx;
-  vCtx.save();
-  vCtx.lineWidth = 5;
-  vCtx.strokeStyle = '#1e293b';
-  vCtx.lineCap = 'round';
-  vCtx.beginPath();
-  vCtx.arc(600, 470, 28, 0.2, Math.PI - 0.2);
-  vCtx.stroke();
-
-  // Art Draw Studio logo watermark in corner
-  vCtx.fillStyle = '#4a90e2';
-  vCtx.font = 'bold 24px sans-serif';
-  vCtx.fillText('ART DRAW STUDIO', 470, 560);
-  vCtx.fillStyle = '#888888';
-  vCtx.font = '14px sans-serif';
-  vCtx.fillText('Customizable Brush Engines & Multi-Layer Workspace', 415, 590);
-  vCtx.restore();
+  const drawLayer = createLayerObject('layer-1', 'Layer 1', 1200, 900);
 
   return {
     id: 'doc-1',
@@ -217,8 +114,8 @@ function createInitialDemoDocument(): CanvasDocument {
     height: 900,
     bgColor: '#ffffff',
     isModified: false,
-    layers: [bgLayer, sketchLayer, vectorLayer, colorLayer],
-    activeLayerId: 'layer-color',
+    layers: [bgLayer, drawLayer],
+    activeLayerId: drawLayer.id,
     transform: {
       x: 0,
       y: 0,
@@ -257,7 +154,7 @@ function createBlankDocument(name = 'Canvas_01.ads', width = 1200, height = 900,
 
 export default function App() {
   // Documents (Multi-Canvas Tabs)
-  const [initialDoc] = useState<CanvasDocument>(() => createInitialDemoDocument());
+  const [initialDoc] = useState<CanvasDocument>(() => createInitialDocument());
   const [documents, setDocuments] = useState<CanvasDocument[]>([initialDoc]);
   const [activeDocId, setActiveDocId] = useState<string>(initialDoc.id);
 
