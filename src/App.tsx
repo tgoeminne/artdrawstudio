@@ -9,6 +9,8 @@ import {
   SelectionRect,
   TouchCalibrationSettings,
   WacomStylusState,
+  CanvasDocument,
+  HistoryStep,
 } from './types';
 import { DEFAULT_BRUSH_PRESETS } from './utils/brushPresets';
 import {
@@ -37,6 +39,12 @@ import { MobileActionsSheet } from './components/Mobile/MobileActionsSheet';
 import { MobileMenuDrawer } from './components/Mobile/MobileMenuDrawer';
 import { TouchCalibrationModal } from './components/Mobile/TouchCalibrationModal';
 import { DesktopBrushSelectionMenu } from './components/DesktopBrushSelectionMenu';
+import { SavePromptModal } from './components/SavePromptModal';
+import {
+  isFileSystemAccessSupported,
+  openProjectWithPicker,
+  saveProjectWithPicker,
+} from './utils/fileSystemAccess';
 
 // Helper to create a new raster or vector layer object
 function createLayerObject(
@@ -71,22 +79,204 @@ function createLayerObject(
   };
 }
 
+function cloneCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = source.width;
+  c.height = source.height;
+  const ctx = c.getContext('2d');
+  if (ctx && source.width > 0 && source.height > 0) {
+    ctx.drawImage(source, 0, 0);
+  }
+  return c;
+}
+
+function cloneLayers(sourceLayers: Layer[]): Layer[] {
+  return sourceLayers.map((l) => {
+    const clonedCanvas = cloneCanvas(l.canvas);
+    const ctx = clonedCanvas.getContext('2d', { willReadFrequently: true })!;
+    return {
+      ...l,
+      canvas: clonedCanvas,
+      ctx,
+      vectorStrokes: l.vectorStrokes ? JSON.parse(JSON.stringify(l.vectorStrokes)) : undefined,
+    };
+  });
+}
+
+function createInitialDemoDocument(): CanvasDocument {
+  const bgLayer = createLayerObject('layer-bg', 'Paper Background', 1200, 900, '#ffffff');
+  const sketchLayer = createLayerObject('layer-sketch', 'Sketch Reference', 1200, 900);
+  const vectorLayer = createLayerObject('layer-vector', 'Vector Lineart (Scalable)', 1200, 900, undefined, 'vector');
+  const colorLayer = createLayerObject('layer-color', 'Highlights & Color', 1200, 900);
+
+  // Draw initial sample art on the sketch layer
+  const sCtx = sketchLayer.ctx;
+  sCtx.save();
+  sCtx.strokeStyle = 'rgba(74, 144, 226, 0.45)';
+  sCtx.lineWidth = 3;
+  sCtx.lineCap = 'round';
+  sCtx.beginPath();
+  sCtx.arc(600, 420, 160, 0, Math.PI * 2);
+  sCtx.stroke();
+  sCtx.beginPath();
+  sCtx.moveTo(600, 240);
+  sCtx.lineTo(600, 600);
+  sCtx.moveTo(430, 430);
+  sCtx.lineTo(770, 430);
+  sCtx.stroke();
+  sCtx.restore();
+
+  // Populate vectorLayer with initial crisp vector strokes
+  const sampleVectorStroke1: VectorStroke = {
+    id: 'v-stroke-eye-1',
+    points: [
+      { x: 520, y: 420, pressure: 0.5 },
+      { x: 540, y: 395, pressure: 0.9 },
+      { x: 570, y: 395, pressure: 0.9 },
+      { x: 590, y: 420, pressure: 0.4 },
+    ],
+    color: '#1e293b',
+    isEraser: false,
+    timestamp: 0,
+    brush: {
+      id: 'g-pen',
+      name: 'G-Pen',
+      category: 'ink',
+      size: 6,
+      opacity: 1,
+      flow: 1,
+      hardness: 1,
+      spacing: 0.05,
+      stabilization: 15,
+      tipShape: 'round',
+      angle: 0,
+      pressureSize: true,
+      pressureOpacity: false,
+      mixGroundColor: false,
+      colorMixRatio: 0,
+      jitter: 0,
+    },
+  };
+
+  const sampleVectorStroke2: VectorStroke = {
+    id: 'v-stroke-eye-2',
+    points: [
+      { x: 610, y: 420, pressure: 0.4 },
+      { x: 630, y: 395, pressure: 0.9 },
+      { x: 660, y: 395, pressure: 0.9 },
+      { x: 680, y: 420, pressure: 0.5 },
+    ],
+    color: '#1e293b',
+    isEraser: false,
+    timestamp: 0,
+    brush: {
+      id: 'g-pen',
+      name: 'G-Pen',
+      category: 'ink',
+      size: 6,
+      opacity: 1,
+      flow: 1,
+      hardness: 1,
+      spacing: 0.05,
+      stabilization: 15,
+      tipShape: 'round',
+      angle: 0,
+      pressureSize: true,
+      pressureOpacity: false,
+      mixGroundColor: false,
+      colorMixRatio: 0,
+      jitter: 0,
+    },
+  };
+
+  vectorLayer.vectorStrokes = [sampleVectorStroke1, sampleVectorStroke2];
+  reRenderVectorLayer(vectorLayer);
+
+  const vCtx = vectorLayer.ctx;
+  vCtx.save();
+  vCtx.lineWidth = 5;
+  vCtx.strokeStyle = '#1e293b';
+  vCtx.lineCap = 'round';
+  vCtx.beginPath();
+  vCtx.arc(600, 470, 28, 0.2, Math.PI - 0.2);
+  vCtx.stroke();
+
+  // Art Draw Studio logo watermark in corner
+  vCtx.fillStyle = '#4a90e2';
+  vCtx.font = 'bold 24px sans-serif';
+  vCtx.fillText('ART DRAW STUDIO', 470, 560);
+  vCtx.fillStyle = '#888888';
+  vCtx.font = '14px sans-serif';
+  vCtx.fillText('Customizable Brush Engines & Multi-Layer Workspace', 415, 590);
+  vCtx.restore();
+
+  return {
+    id: 'doc-1',
+    name: 'Canvas_01.ads',
+    width: 1200,
+    height: 900,
+    bgColor: '#ffffff',
+    isModified: false,
+    layers: [bgLayer, sketchLayer, vectorLayer, colorLayer],
+    activeLayerId: 'layer-color',
+    transform: {
+      x: 0,
+      y: 0,
+      zoom: 0.85,
+      rotation: 0,
+      flipH: false,
+    },
+    historyStack: [],
+    historyIndex: -1,
+  };
+}
+
+function createBlankDocument(name = 'Canvas_01.ads', width = 1200, height = 900, bgColor = '#ffffff'): CanvasDocument {
+  const bgLayer = createLayerObject(`layer-bg-${Date.now()}`, 'Paper Background', width, height, bgColor);
+  const drawLayer = createLayerObject(`layer-1-${Date.now()}`, 'Layer 1', width, height);
+  return {
+    id: `doc-${Date.now()}`,
+    name,
+    width,
+    height,
+    bgColor,
+    isModified: false,
+    layers: [bgLayer, drawLayer],
+    activeLayerId: drawLayer.id,
+    transform: {
+      x: 0,
+      y: 0,
+      zoom: 0.85,
+      rotation: 0,
+      flipH: false,
+    },
+    historyStack: [],
+    historyIndex: -1,
+  };
+}
+
 export default function App() {
-  // Canvas specifications
-  const [canvasWidth, setCanvasWidth] = useState(1200);
-  const [canvasHeight, setCanvasHeight] = useState(900);
-  const [canvasBgColor, setCanvasBgColor] = useState('#ffffff');
-  const [canvasName, setCanvasName] = useState('Canvas_01.ads');
-  const [isModified, setIsModified] = useState(false);
+  // Documents (Multi-Canvas Tabs)
+  const [initialDoc] = useState<CanvasDocument>(() => createInitialDemoDocument());
+  const [documents, setDocuments] = useState<CanvasDocument[]>([initialDoc]);
+  const [activeDocId, setActiveDocId] = useState<string>(initialDoc.id);
+
+  // Active Canvas specifications
+  const [canvasWidth, setCanvasWidth] = useState(initialDoc.width);
+  const [canvasHeight, setCanvasHeight] = useState(initialDoc.height);
+  const [canvasBgColor, setCanvasBgColor] = useState(initialDoc.bgColor);
+  const [canvasName, setCanvasName] = useState(initialDoc.name);
+  const [isModified, setIsModified] = useState(initialDoc.isModified);
+  const [activeFileHandle, setActiveFileHandle] = useState<FileSystemFileHandle | undefined>(
+    initialDoc.fileHandle
+  );
 
   // Transform (pan, zoom, rotation, flip)
-  const [transform, setTransform] = useState<CanvasTransform>({
-    x: 0,
-    y: 0,
-    zoom: 0.85,
-    rotation: 0,
-    flipH: false,
-  });
+  const [transform, setTransform] = useState<CanvasTransform>(initialDoc.transform);
+
+  // Multi-layer state for active canvas
+  const [layers, setLayers] = useState<Layer[]>(initialDoc.layers);
+  const [activeLayerId, setActiveLayerId] = useState<string>(initialDoc.activeLayerId);
 
   // Tools & Brushes
   const [activeTool, setActiveTool] = useState<ToolType>('brush');
@@ -144,6 +334,23 @@ export default function App() {
   const [isTouchCalibModalOpen, setIsTouchCalibModalOpen] = useState(false);
   const [stylusState, setStylusState] = useState<WacomStylusState | null>(null);
   const [isDesktopBrushMenuOpen, setIsDesktopBrushMenuOpen] = useState(false);
+  const [closePromptTarget, setClosePromptTarget] = useState<{
+    docId: string;
+    fileName: string;
+  } | null>(null);
+
+  // Warn user before closing or reloading tab if any document has unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const anyModified = isModified || documents.some((d) => d.isModified);
+      if (anyModified) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isModified, documents]);
 
   const handleUpdateTouchSettings = (updates: Partial<TouchCalibrationSettings>) => {
     setTouchSettings((prev) => {
@@ -162,137 +369,6 @@ export default function App() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  // Multi-layer state
-  const [layers, setLayers] = useState<Layer[]>(() => {
-    const bgLayer = createLayerObject('layer-bg', 'Paper Background', 1200, 900, '#ffffff');
-    const sketchLayer = createLayerObject('layer-sketch', 'Sketch Reference', 1200, 900);
-    const vectorLayer = createLayerObject('layer-vector', 'Vector Lineart (Scalable)', 1200, 900, undefined, 'vector');
-    const colorLayer = createLayerObject('layer-color', 'Highlights & Color', 1200, 900);
-
-    // Draw initial sample art on the sketch layer
-    const sCtx = sketchLayer.ctx;
-    sCtx.save();
-    sCtx.strokeStyle = 'rgba(74, 144, 226, 0.45)';
-    sCtx.lineWidth = 3;
-    sCtx.lineCap = 'round';
-    // Gentle manga sketch curve
-    sCtx.beginPath();
-    sCtx.arc(600, 420, 160, 0, Math.PI * 2);
-    sCtx.stroke();
-    sCtx.beginPath();
-    sCtx.moveTo(600, 240);
-    sCtx.lineTo(600, 600);
-    sCtx.moveTo(430, 430);
-    sCtx.lineTo(770, 430);
-    sCtx.stroke();
-    sCtx.restore();
-
-    // Populate vectorLayer with initial crisp vector strokes
-    const sampleVectorStroke1: VectorStroke = {
-      id: 'v-stroke-eye-1',
-      points: [
-        { x: 520, y: 420, pressure: 0.5 },
-        { x: 540, y: 395, pressure: 0.9 },
-        { x: 570, y: 395, pressure: 0.9 },
-        { x: 590, y: 420, pressure: 0.4 },
-      ],
-      color: '#1e293b',
-      isEraser: false,
-      timestamp: 0,
-      brush: {
-        id: 'g-pen',
-        name: 'G-Pen',
-        category: 'ink',
-        size: 6,
-        opacity: 1,
-        flow: 1,
-        hardness: 1,
-        spacing: 0.05,
-        stabilization: 15,
-        tipShape: 'round',
-        angle: 0,
-        pressureSize: true,
-        pressureOpacity: false,
-        mixGroundColor: false,
-        colorMixRatio: 0,
-        jitter: 0,
-      },
-    };
-
-    const sampleVectorStroke2: VectorStroke = {
-      id: 'v-stroke-eye-2',
-      points: [
-        { x: 610, y: 420, pressure: 0.4 },
-        { x: 630, y: 395, pressure: 0.9 },
-        { x: 660, y: 395, pressure: 0.9 },
-        { x: 680, y: 420, pressure: 0.5 },
-      ],
-      color: '#1e293b',
-      isEraser: false,
-      timestamp: 0,
-      brush: {
-        id: 'g-pen',
-        name: 'G-Pen',
-        category: 'ink',
-        size: 6,
-        opacity: 1,
-        flow: 1,
-        hardness: 1,
-        spacing: 0.05,
-        stabilization: 15,
-        tipShape: 'round',
-        angle: 0,
-        pressureSize: true,
-        pressureOpacity: false,
-        mixGroundColor: false,
-        colorMixRatio: 0,
-        jitter: 0,
-      },
-    };
-
-    vectorLayer.vectorStrokes = [sampleVectorStroke1, sampleVectorStroke2];
-    reRenderVectorLayer(vectorLayer);
-
-    const vCtx = vectorLayer.ctx;
-    vCtx.save();
-    // Smile
-    vCtx.lineWidth = 5;
-    vCtx.strokeStyle = '#1e293b';
-    vCtx.lineCap = 'round';
-    vCtx.beginPath();
-    vCtx.arc(600, 470, 28, 0.2, Math.PI - 0.2);
-    vCtx.stroke();
-
-    // Art Draw Studio logo watermark in corner
-    vCtx.fillStyle = '#4a90e2';
-    vCtx.font = 'bold 24px sans-serif';
-    vCtx.fillText('ART DRAW STUDIO', 470, 560);
-    vCtx.fillStyle = '#888888';
-    vCtx.font = '14px sans-serif';
-    vCtx.fillText('Customizable Brush Engines & Multi-Layer Workspace', 415, 590);
-    vCtx.restore();
-
-    return [bgLayer, sketchLayer, vectorLayer, colorLayer];
-  });
-
-  const [activeLayerId, setActiveLayerId] = useState<string>('layer-color');
-
-  // History Stack for Undo/Redo
-  interface HistoryStep {
-    layersSnapshot: {
-      id: string;
-      name: string;
-      type?: LayerType;
-      vectorStrokes?: VectorStroke[];
-      visible: boolean;
-      locked: boolean;
-      opacity: number;
-      blendMode: any;
-      imageData: ImageData;
-    }[];
-    activeLayerId: string;
-  }
 
   const historyStackRef = useRef<HistoryStep[]>([]);
   const historyIndexRef = useRef<number>(-1);
@@ -656,13 +732,76 @@ export default function App() {
     link.click();
   };
 
-  const handleSaveProject = () => {
-    const projectData = {
+  // Helper to snapshot active document
+  const getCurrentDocSnapshot = (): CanvasDocument => {
+    return {
+      id: activeDocId,
       name: canvasName,
       width: canvasWidth,
       height: canvasHeight,
       bgColor: canvasBgColor,
-      layers: layers.map((l) => ({
+      isModified,
+      layers: cloneLayers(layers),
+      activeLayerId,
+      transform,
+      historyStack: historyStackRef.current,
+      historyIndex: historyIndexRef.current,
+      fileHandle: activeFileHandle,
+    };
+  };
+
+  const handleSelectDocument = (targetDocId: string) => {
+    if (targetDocId === activeDocId) return;
+
+    // Snapshot currently active document
+    const currentSnapshot = getCurrentDocSnapshot();
+
+    const targetDoc = documents.find((d) => d.id === targetDocId);
+    if (!targetDoc) return;
+
+    // Update documents list with current snapshot
+    setDocuments((prev) =>
+      prev.map((d) => (d.id === activeDocId ? currentSnapshot : d))
+    );
+
+    // Switch to target document
+    setActiveDocId(targetDoc.id);
+    setCanvasWidth(targetDoc.width);
+    setCanvasHeight(targetDoc.height);
+    setCanvasBgColor(targetDoc.bgColor);
+    setCanvasName(targetDoc.name);
+    setIsModified(targetDoc.isModified);
+    setActiveFileHandle(targetDoc.fileHandle);
+    const activatedLayers = cloneLayers(targetDoc.layers);
+    setLayers(activatedLayers);
+    setActiveLayerId(targetDoc.activeLayerId);
+    setTransform(targetDoc.transform);
+    historyStackRef.current = targetDoc.historyStack;
+    historyIndexRef.current = targetDoc.historyIndex;
+    setCanUndo(targetDoc.historyIndex > 0);
+    setCanRedo(
+      targetDoc.historyIndex >= 0 &&
+      targetDoc.historyIndex < targetDoc.historyStack.length - 1
+    );
+
+    setTimeout(() => {
+      updateLayerThumbnail(targetDoc.activeLayerId);
+    }, 50);
+  };
+
+  const serializeDocToJson = (
+    docName: string,
+    width: number,
+    height: number,
+    bgColor: string,
+    docLayers: Layer[]
+  ): string => {
+    const projectData = {
+      name: docName,
+      width,
+      height,
+      bgColor,
+      layers: docLayers.map((l) => ({
         id: l.id,
         name: l.name,
         visible: l.visible,
@@ -672,53 +811,256 @@ export default function App() {
         dataUrl: l.canvas.toDataURL(),
       })),
     };
-
-    const blob = new Blob([JSON.stringify(projectData, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.download = `${canvasName.replace(/\.[^/.]+$/, '')}.ads.json`;
-    link.href = url;
-    link.click();
-    URL.revokeObjectURL(url);
-    setIsModified(false);
+    return JSON.stringify(projectData, null, 2);
   };
 
-  const handleLoadProject = (file: File) => {
+  const handleSaveProject = async (forceSaveAs = false) => {
+    const jsonString = serializeDocToJson(canvasName, canvasWidth, canvasHeight, canvasBgColor, layers);
+    const result = await saveProjectWithPicker(jsonString, {
+      handle: activeFileHandle,
+      suggestedName: canvasName,
+      forceSaveAs,
+    });
+
+    if (result.success) {
+      setIsModified(false);
+      if (result.handle) {
+        setActiveFileHandle(result.handle);
+      }
+      const newName = result.fileName || canvasName;
+      if (result.fileName) {
+        setCanvasName(result.fileName);
+      }
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === activeDocId
+            ? {
+                ...d,
+                isModified: false,
+                name: newName,
+                fileHandle: result.handle || activeFileHandle,
+              }
+            : d
+        )
+      );
+    }
+  };
+
+  const handleSaveProjectAs = () => {
+    return handleSaveProject(true);
+  };
+
+  const handleOpenProject = async () => {
+    if (isFileSystemAccessSupported()) {
+      const result = await openProjectWithPicker();
+      if (result) {
+        handleLoadProject(result.file, result.handle);
+      }
+    }
+  };
+
+  const executeCloseDocument = (docIdToClose: string) => {
+    if (docIdToClose === activeDocId) {
+      const remaining = documents.filter((d) => d.id !== docIdToClose);
+      if (remaining.length === 0) {
+        // Closed the last document: create a fresh blank canvas
+        const newDoc = createBlankDocument();
+        setDocuments([newDoc]);
+        setActiveDocId(newDoc.id);
+        setCanvasWidth(newDoc.width);
+        setCanvasHeight(newDoc.height);
+        setCanvasBgColor(newDoc.bgColor);
+        setCanvasName(newDoc.name);
+        setIsModified(false);
+        setActiveFileHandle(undefined);
+        setLayers(newDoc.layers);
+        setActiveLayerId(newDoc.activeLayerId);
+        setTransform(newDoc.transform);
+        historyStackRef.current = [];
+        historyIndexRef.current = -1;
+        setCanUndo(false);
+        setCanRedo(false);
+      } else {
+        const currentIndex = documents.findIndex((d) => d.id === docIdToClose);
+        const nextDoc = remaining[Math.max(0, currentIndex - 1)];
+        setDocuments(remaining);
+        setActiveDocId(nextDoc.id);
+        setCanvasWidth(nextDoc.width);
+        setCanvasHeight(nextDoc.height);
+        setCanvasBgColor(nextDoc.bgColor);
+        setCanvasName(nextDoc.name);
+        setIsModified(nextDoc.isModified);
+        setActiveFileHandle(nextDoc.fileHandle);
+        const activatedLayers = cloneLayers(nextDoc.layers);
+        setLayers(activatedLayers);
+        setActiveLayerId(nextDoc.activeLayerId);
+        setTransform(nextDoc.transform);
+        historyStackRef.current = nextDoc.historyStack;
+        historyIndexRef.current = nextDoc.historyIndex;
+        setCanUndo(nextDoc.historyIndex > 0);
+        setCanRedo(
+          nextDoc.historyIndex >= 0 &&
+          nextDoc.historyIndex < nextDoc.historyStack.length - 1
+        );
+      }
+    } else {
+      setDocuments((prev) => prev.filter((d) => d.id !== docIdToClose));
+    }
+  };
+
+  const handleCloseDocument = (docIdToClose: string) => {
+    const isTargetActive = docIdToClose === activeDocId;
+    const targetDoc = isTargetActive ? null : documents.find((d) => d.id === docIdToClose);
+    const targetName = isTargetActive ? canvasName : (targetDoc?.name || 'Untitled');
+    const isTargetModified = isTargetActive ? isModified : (targetDoc?.isModified ?? false);
+
+    if (isTargetModified) {
+      setClosePromptTarget({
+        docId: docIdToClose,
+        fileName: targetName,
+      });
+      return;
+    }
+
+    executeCloseDocument(docIdToClose);
+  };
+
+  const handleSaveAndClose = async () => {
+    if (!closePromptTarget) return;
+    const { docId } = closePromptTarget;
+
+    if (docId === activeDocId) {
+      const jsonString = serializeDocToJson(canvasName, canvasWidth, canvasHeight, canvasBgColor, layers);
+      const result = await saveProjectWithPicker(jsonString, {
+        handle: activeFileHandle,
+        suggestedName: canvasName,
+        forceSaveAs: false,
+      });
+      if (result.cancelled) {
+        return;
+      }
+      setIsModified(false);
+    } else {
+      const targetDoc = documents.find((d) => d.id === docId);
+      if (targetDoc) {
+        const jsonString = serializeDocToJson(
+          targetDoc.name,
+          targetDoc.width,
+          targetDoc.height,
+          targetDoc.bgColor,
+          targetDoc.layers
+        );
+        const result = await saveProjectWithPicker(jsonString, {
+          handle: targetDoc.fileHandle,
+          suggestedName: targetDoc.name,
+          forceSaveAs: false,
+        });
+        if (result.cancelled) {
+          return;
+        }
+      }
+    }
+
+    setClosePromptTarget(null);
+    executeCloseDocument(docId);
+  };
+
+  const handleDiscardAndClose = () => {
+    if (!closePromptTarget) return;
+    const docId = closePromptTarget.docId;
+    setClosePromptTarget(null);
+    executeCloseDocument(docId);
+  };
+
+  const handleCancelClosePrompt = () => {
+    setClosePromptTarget(null);
+  };
+
+  const handleLoadProject = (file: File, handle?: FileSystemFileHandle) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target?.result as string);
         if (data.width && data.height && Array.isArray(data.layers)) {
-          setCanvasWidth(data.width);
-          setCanvasHeight(data.height);
-          setCanvasBgColor(data.bgColor || '#ffffff');
-          setCanvasName(data.name || file.name);
+          const currentSnapshot = getCurrentDocSnapshot();
+          const newDocId = `doc-${Date.now()}`;
 
-          const loadedLayers: Layer[] = data.layers.map((l: any) => {
-            const layerObj = createLayerObject(l.id, l.name, data.width, data.height);
-            layerObj.visible = l.visible;
-            layerObj.locked = l.locked;
-            layerObj.opacity = l.opacity;
-            layerObj.blendMode = l.blendMode;
+          const loadedLayers: Layer[] = data.layers.map((l: any, idx: number) => {
+            const layerObj = createLayerObject(
+              l.id || `layer-${newDocId}-${idx}`,
+              l.name || `Layer ${idx + 1}`,
+              data.width,
+              data.height,
+              undefined,
+              l.type
+            );
+            layerObj.visible = l.visible !== undefined ? l.visible : true;
+            layerObj.locked = l.locked !== undefined ? l.locked : false;
+            layerObj.opacity = l.opacity !== undefined ? l.opacity : 1.0;
+            layerObj.blendMode = l.blendMode || 'source-over';
+            layerObj.vectorStrokes = l.vectorStrokes;
 
             if (l.dataUrl) {
               const img = new Image();
               img.onload = () => {
                 layerObj.ctx.drawImage(img, 0, 0);
-                updateLayerThumbnail(layerObj.id);
+                if (idx === data.layers.length - 1) {
+                  updateLayerThumbnail(layerObj.id);
+                }
               };
               img.src = l.dataUrl;
+            }
+
+            if (l.type === 'vector' && l.vectorStrokes) {
+              reRenderVectorLayer(layerObj);
             }
             return layerObj;
           });
 
+          const newDoc: CanvasDocument = {
+            id: newDocId,
+            name: data.name || file.name,
+            width: data.width,
+            height: data.height,
+            bgColor: data.bgColor || '#ffffff',
+            isModified: false,
+            layers: cloneLayers(loadedLayers),
+            activeLayerId: loadedLayers[loadedLayers.length - 1]?.id || '',
+            transform: {
+              x: 0,
+              y: 0,
+              zoom: 0.85,
+              rotation: 0,
+              flipH: false,
+            },
+            historyStack: [],
+            historyIndex: -1,
+            fileHandle: handle,
+          };
+
+          setDocuments((prev) => {
+            const updated = prev.map((d) => (d.id === activeDocId ? currentSnapshot : d));
+            return [...updated, newDoc];
+          });
+
+          setActiveDocId(newDocId);
+          setCanvasWidth(data.width);
+          setCanvasHeight(data.height);
+          setCanvasBgColor(data.bgColor || '#ffffff');
+          setCanvasName(data.name || file.name);
+          setIsModified(false);
+          setActiveFileHandle(handle);
           setLayers(loadedLayers);
-          setActiveLayerId(loadedLayers[loadedLayers.length - 1].id);
+          setActiveLayerId(loadedLayers[loadedLayers.length - 1]?.id || '');
           historyStackRef.current = [];
           historyIndexRef.current = -1;
+          setCanUndo(false);
+          setCanRedo(false);
           handleFitScreen();
+
+          setTimeout(() => {
+            recordHistory();
+          }, 150);
         }
       } catch (err) {
         console.error('Failed to load project file', err);
@@ -754,19 +1096,59 @@ export default function App() {
     bgColor: string,
     name: string
   ) => {
+    // 1. Snapshot the current document so its state & drawings are preserved in its tab
+    const currentSnapshot = getCurrentDocSnapshot();
+
+    // 2. Create the new document
+    const newDocId = `doc-${Date.now()}`;
+    const bgLayer = createLayerObject(`layer-bg-${newDocId}`, 'Paper Background', width, height, bgColor);
+    const drawLayer = createLayerObject(`layer-1-${newDocId}`, 'Layer 1', width, height);
+    const newLayers = [bgLayer, drawLayer];
+    const newTransform: CanvasTransform = {
+      x: 0,
+      y: 0,
+      zoom: 0.85,
+      rotation: 0,
+      flipH: false,
+    };
+
+    const newDoc: CanvasDocument = {
+      id: newDocId,
+      name,
+      width,
+      height,
+      bgColor,
+      isModified: false,
+      layers: cloneLayers(newLayers),
+      activeLayerId: drawLayer.id,
+      transform: newTransform,
+      historyStack: [],
+      historyIndex: -1,
+    };
+
+    // 3. Update documents list: keep previous document and add new document
+    setDocuments((prev) => {
+      const updated = prev.map((d) => (d.id === activeDocId ? currentSnapshot : d));
+      return [...updated, newDoc];
+    });
+
+    // 4. Activate new document
+    setActiveDocId(newDocId);
     setCanvasWidth(width);
     setCanvasHeight(height);
     setCanvasBgColor(bgColor);
     setCanvasName(name);
-
-    const bgLayer = createLayerObject('layer-bg', 'Paper Background', width, height, bgColor);
-    const drawLayer = createLayerObject('layer-1', 'Layer 1', width, height);
-
-    setLayers([bgLayer, drawLayer]);
+    setIsModified(false);
+    setActiveFileHandle(undefined);
+    setLayers(newLayers);
     setActiveLayerId(drawLayer.id);
+    setTransform(newTransform);
     historyStackRef.current = [];
     historyIndexRef.current = -1;
+    setCanUndo(false);
+    setCanRedo(false);
     handleFitScreen();
+
     setTimeout(() => {
       recordHistory();
     }, 100);
@@ -854,7 +1236,29 @@ export default function App() {
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        handleSaveProject();
+        if (e.shiftKey) {
+          handleSaveProjectAs();
+        } else {
+          handleSaveProject(false);
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        handleOpenProject();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setIsNewCanvasModalOpen(true);
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        handleCloseDocument(activeDocId);
         return;
       }
 
@@ -926,7 +1330,25 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [layers, activeLayerId]);
+  }, [layers, activeLayerId, activeDocId, documents, canvasName, canvasWidth, canvasHeight, canvasBgColor, isModified, transform]);
+
+  // Dynamic Tabs List
+  const tabs = documents.map((doc) => {
+    if (doc.id === activeDocId) {
+      return {
+        id: doc.id,
+        name: canvasName,
+        isModified: isModified,
+        zoom: transform.zoom,
+      };
+    }
+    return {
+      id: doc.id,
+      name: doc.name,
+      isModified: doc.isModified,
+      zoom: doc.transform.zoom,
+    };
+  });
 
   return (
     <div
@@ -1086,13 +1508,19 @@ export default function App() {
             onClose={() => setMobileDrawerOpen(false)}
             onNewCanvas={() => setIsNewCanvasModalOpen(true)}
             onSaveProject={handleSaveProject}
+            onSaveProjectAs={handleSaveProjectAs}
             onLoadProject={handleLoadProject}
+            onOpenProjectPicker={handleOpenProject}
             onImportImage={handleImportImage}
             onExportPng={handleExportPng}
             onExportJpg={handleExportJpg}
             onFitScreen={handleFitScreen}
             onSwitchToDesktop={() => setLayoutMode('desktop')}
             canvasName={canvasName}
+            tabs={tabs}
+            activeTabId={activeDocId}
+            onSelectTab={handleSelectDocument}
+            onCloseTab={handleCloseDocument}
           />
         </div>
       ) : (
@@ -1105,10 +1533,13 @@ export default function App() {
             canUndo={canUndo}
             canRedo={canRedo}
             onNewCanvas={() => setIsNewCanvasModalOpen(true)}
+            onCloseCanvas={() => handleCloseDocument(activeDocId)}
             onExportPng={handleExportPng}
             onExportJpg={handleExportJpg}
             onSaveProject={handleSaveProject}
+            onSaveProjectAs={handleSaveProjectAs}
             onLoadProject={handleLoadProject}
+            onOpenProjectPicker={handleOpenProject}
             onImportImage={handleImportImage}
             onClearActiveLayer={handleClearActiveLayer}
             onFlipCanvasH={handleFlipCanvasH}
@@ -1152,9 +1583,10 @@ export default function App() {
             <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
               {/* Sub-tool & Document Tab Bar */}
               <CanvasTabBar
-                canvasName={canvasName}
-                isModified={isModified}
-                zoom={transform.zoom}
+                tabs={tabs}
+                activeTabId={activeDocId}
+                onSelectTab={handleSelectDocument}
+                onCloseTab={handleCloseDocument}
                 onNewCanvas={() => setIsNewCanvasModalOpen(true)}
                 onResetView={handleResetView}
                 onFitScreen={handleFitScreen}
@@ -1282,6 +1714,15 @@ export default function App() {
         onClose={() => setIsTouchCalibModalOpen(false)}
         settings={touchSettings}
         onSaveSettings={handleUpdateTouchSettings}
+      />
+
+      {/* 8. Save Prompt Modal on Document Close */}
+      <SavePromptModal
+        isOpen={closePromptTarget !== null}
+        fileName={closePromptTarget?.fileName || ''}
+        onSaveAndClose={handleSaveAndClose}
+        onDiscardAndClose={handleDiscardAndClose}
+        onCancel={handleCancelClosePrompt}
       />
     </div>
   );

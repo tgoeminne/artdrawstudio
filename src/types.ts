@@ -154,3 +154,33 @@ export interface TouchCalibrationSettings {
   enableRotation?: boolean;
   wacomEraserAutoSwitch?: boolean;
 }
+
+export interface HistoryStep {
+  layersSnapshot: {
+    id: string;
+    name: string;
+    type?: LayerType;
+    vectorStrokes?: VectorStroke[];
+    visible: boolean;
+    locked: boolean;
+    opacity: number;
+    blendMode: any;
+    imageData: ImageData;
+  }[];
+  activeLayerId: string;
+}
+
+export interface CanvasDocument {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  bgColor: string;
+  isModified: boolean;
+  layers: Layer[];
+  activeLayerId: string;
+  transform: CanvasTransform;
+  historyStack: HistoryStep[];
+  historyIndex: number;
+  fileHandle?: FileSystemFileHandle;
+}

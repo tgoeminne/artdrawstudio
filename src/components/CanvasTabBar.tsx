@@ -3,10 +3,18 @@ import { X, Plus, Sparkles, Smartphone, Crosshair, ChevronDown, PenTool } from '
 import { BrushSettings } from '../types';
 import { BrushStrokePreview } from './BrushStrokePreview';
 
-interface CanvasTabBarProps {
-  canvasName: string;
+export interface TabItem {
+  id: string;
+  name: string;
   isModified: boolean;
   zoom: number;
+}
+
+interface CanvasTabBarProps {
+  tabs: TabItem[];
+  activeTabId: string;
+  onSelectTab: (id: string) => void;
+  onCloseTab: (id: string) => void;
   onNewCanvas: () => void;
   onResetView: () => void;
   onFitScreen: () => void;
@@ -19,9 +27,10 @@ interface CanvasTabBarProps {
 }
 
 export const CanvasTabBar: React.FC<CanvasTabBarProps> = ({
-  canvasName,
-  isModified,
-  zoom,
+  tabs,
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
   onNewCanvas,
   onResetView,
   onFitScreen,
@@ -37,30 +46,51 @@ export const CanvasTabBar: React.FC<CanvasTabBarProps> = ({
       id="canvas-tab-bar"
       className="h-7 bg-[#323232] border-b border-black flex items-center px-2 text-[10px] gap-2 select-none z-10"
     >
-      {/* Active Document Tab */}
-      <div className="bg-[#262626] px-2.5 py-1 border-x border-t border-black rounded-t-sm text-white flex items-center gap-1.5 shadow-sm font-medium">
-        <span>
-          {canvasName}
-          {isModified ? '*' : ''}
-        </span>
-        <span className="text-[9px] text-[#4a90e2]">({Math.round(zoom * 100)}%)</span>
-      </div>
+      {/* Document Tabs List */}
+      <div className="flex items-center overflow-x-auto no-scrollbar max-w-[55vw] h-full pt-1">
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeTabId;
+          return (
+            <div
+              key={tab.id}
+              onClick={() => onSelectTab(tab.id)}
+              className={`h-full px-2.5 flex items-center gap-1.5 text-[10px] cursor-pointer group transition-all select-none border-t border-x ${
+                isActive
+                  ? 'bg-[#232323] border-black border-b-transparent text-white font-semibold rounded-t-xs shadow-xs'
+                  : 'bg-[#2a2a2a] hover:bg-[#333333] border-transparent text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <span className="truncate max-w-[130px]" title={tab.name}>
+                {tab.name}
+                {tab.isModified ? '*' : ''}
+              </span>
+              <span className={`text-[9px] ${isActive ? 'text-[#4a90e2]' : 'text-gray-500'}`}>
+                ({Math.round(tab.zoom * 100)}%)
+              </span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCloseTab(tab.id);
+                }}
+                title={`Close ${tab.name}`}
+                className={`p-0.5 rounded-xs hover:bg-white/10 hover:text-red-400 transition-colors ${
+                  isActive ? 'text-gray-400' : 'opacity-0 group-hover:opacity-100 text-gray-400'
+                }`}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          );
+        })}
 
-      {/* Secondary Demo Project Tabs */}
-      <div
-        className="px-2 py-1 text-gray-400 hover:text-gray-200 cursor-pointer hidden lg:block"
-        title="Sample reference canvas tab"
-      >
-        Concept_Sketch.png
+        <button
+          onClick={onNewCanvas}
+          title="New Canvas (Ctrl+N)"
+          className="p-1 ml-1 text-gray-400 hover:text-white rounded hover:bg-[#444] transition-colors shrink-0"
+        >
+          <Plus size={13} />
+        </button>
       </div>
-
-      <button
-        onClick={onNewCanvas}
-        title="New Canvas"
-        className="p-1 text-gray-400 hover:text-white rounded hover:bg-[#444]"
-      >
-        <Plus size={12} />
-      </button>
 
       {/* Active Sub Tool [Brush] Quick Selector Trigger with Stroke Preview */}
       {activeBrush && onOpenBrushMenu && (

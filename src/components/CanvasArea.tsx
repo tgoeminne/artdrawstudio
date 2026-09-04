@@ -795,11 +795,14 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
               key={layer.id}
               ref={(el) => {
                 if (el && layer.canvas !== el) {
-                  // Attach DOM canvas element to layer object
+                  const prevCanvas = layer.canvas;
                   layer.canvas = el;
                   const ctx = el.getContext('2d', { willReadFrequently: true });
                   if (ctx) {
                     layer.ctx = ctx;
+                    if (prevCanvas && prevCanvas.width > 0 && prevCanvas.height > 0) {
+                      ctx.drawImage(prevCanvas, 0, 0);
+                    }
                   }
                 }
               }}

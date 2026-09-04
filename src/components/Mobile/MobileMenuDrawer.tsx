@@ -9,6 +9,10 @@ import {
   Monitor,
   Maximize2,
   Info,
+  Sliders,
+  ExternalLink,
+  ChevronRight,
+  Trash2,
 } from 'lucide-react';
 
 interface MobileMenuDrawerProps {
@@ -16,13 +20,19 @@ interface MobileMenuDrawerProps {
   onClose: () => void;
   onNewCanvas: () => void;
   onSaveProject: () => void;
+  onSaveProjectAs?: () => void;
   onLoadProject: (file: File) => void;
+  onOpenProjectPicker?: () => void;
   onImportImage: (file: File) => void;
   onExportPng: () => void;
   onExportJpg: () => void;
   onFitScreen: () => void;
   onSwitchToDesktop: () => void;
   canvasName: string;
+  tabs?: { id: string; name: string; isModified: boolean; zoom: number }[];
+  activeTabId?: string;
+  onSelectTab?: (id: string) => void;
+  onCloseTab?: (id: string) => void;
 }
 
 export const MobileMenuDrawer: React.FC<MobileMenuDrawerProps> = ({
@@ -30,13 +40,19 @@ export const MobileMenuDrawer: React.FC<MobileMenuDrawerProps> = ({
   onClose,
   onNewCanvas,
   onSaveProject,
+  onSaveProjectAs,
   onLoadProject,
+  onOpenProjectPicker,
   onImportImage,
   onExportPng,
   onExportJpg,
   onFitScreen,
   onSwitchToDesktop,
   canvasName,
+  tabs,
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
 }) => {
   const projectInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -102,6 +118,63 @@ export const MobileMenuDrawer: React.FC<MobileMenuDrawerProps> = ({
 
         {/* Drawer Menu Items */}
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4 text-xs">
+          {/* Open Canvases List */}
+          {tabs && tabs.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                  Open Canvases ({tabs.length})
+                </span>
+                <button
+                  onClick={() => {
+                    onNewCanvas();
+                    onClose();
+                  }}
+                  className="text-blue-400 hover:text-blue-300 text-[10px] flex items-center gap-1 font-semibold"
+                >
+                  <FilePlus size={11} />
+                  <span>New</span>
+                </button>
+              </div>
+              <div className="flex flex-col gap-1 max-h-36 overflow-y-auto pr-1 no-scrollbar">
+                {tabs.map((tab) => {
+                  const isActive = tab.id === activeTabId;
+                  return (
+                    <div
+                      key={tab.id}
+                      onClick={() => {
+                        onSelectTab?.(tab.id);
+                        onClose();
+                      }}
+                      className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition-colors ${
+                        isActive
+                          ? 'bg-[#1e293b] text-white font-semibold border border-blue-500/50 shadow-xs'
+                          : 'bg-[#282828] text-gray-300 active:bg-[#333]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-blue-400' : 'bg-gray-500'}`} />
+                        <span className="truncate">{tab.name}{tab.isModified ? '*' : ''}</span>
+                      </div>
+                      {onCloseTab && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onCloseTab(tab.id);
+                          }}
+                          title="Close canvas"
+                          className="p-1 hover:text-red-400 text-gray-400 rounded hover:bg-black/30"
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* File Operations */}
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 py-1">
@@ -129,8 +202,28 @@ export const MobileMenuDrawer: React.FC<MobileMenuDrawerProps> = ({
               <span>Save Project (.ads.json)</span>
             </button>
 
+            {onSaveProjectAs && (
+              <button
+                onClick={() => {
+                  onSaveProjectAs();
+                  onClose();
+                }}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-[#282828] active:bg-[#383838] text-gray-200"
+              >
+                <Download size={16} className="text-teal-400" />
+                <span>Save Project As...</span>
+              </button>
+            )}
+
             <button
-              onClick={() => projectInputRef.current?.click()}
+              onClick={() => {
+                if (onOpenProjectPicker) {
+                  onOpenProjectPicker();
+                } else {
+                  projectInputRef.current?.click();
+                }
+                onClose();
+              }}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-[#282828] active:bg-[#383838] text-gray-200"
             >
               <FolderOpen size={16} className="text-amber-400" />

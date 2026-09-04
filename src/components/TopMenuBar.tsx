@@ -15,6 +15,8 @@ import {
   Layers,
   Sparkles,
   PenTool,
+  X,
+  Save,
 } from 'lucide-react';
 
 interface TopMenuBarProps {
@@ -26,7 +28,9 @@ interface TopMenuBarProps {
   onExportPng: () => void;
   onExportJpg: () => void;
   onSaveProject: () => void;
+  onSaveProjectAs?: () => void;
   onLoadProject: (file: File) => void;
+  onOpenProjectPicker?: () => void;
   onImportImage: (file: File) => void;
   onClearActiveLayer: () => void;
   onFlipCanvasH: () => void;
@@ -37,6 +41,7 @@ interface TopMenuBarProps {
   onSelectAll: () => void;
   onDeselect: () => void;
   onOpenBrushMenu?: () => void;
+  onCloseCanvas?: () => void;
 }
 
 export const TopMenuBar: React.FC<TopMenuBarProps> = ({
@@ -48,7 +53,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   onExportPng,
   onExportJpg,
   onSaveProject,
+  onSaveProjectAs,
   onLoadProject,
+  onOpenProjectPicker,
   onImportImage,
   onClearActiveLayer,
   onFlipCanvasH,
@@ -59,6 +66,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   onSelectAll,
   onDeselect,
   onOpenBrushMenu,
+  onCloseCanvas,
 }) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
@@ -138,7 +146,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             File
           </button>
           {activeMenu === 'file' && (
-            <div className="absolute top-7 left-0 w-48 bg-[#252525] border border-black shadow-2xl py-1 text-[11px] text-[#d1d1d1] rounded z-50 flex flex-col">
+            <div className="absolute top-7 left-0 w-52 bg-[#252525] border border-black shadow-2xl py-1 text-[11px] text-[#d1d1d1] rounded z-50 flex flex-col">
               <button
                 onClick={() => { onNewCanvas(); setActiveMenu(null); }}
                 className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
@@ -157,15 +165,41 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 onClick={() => { onSaveProject(); setActiveMenu(null); }}
                 className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
               >
-                <span className="flex items-center gap-2"><Download size={13} /> Save Project (.ads)...</span>
+                <span className="flex items-center gap-2"><Save size={13} /> Save Project (.ads)...</span>
                 <span className="text-[9px] text-gray-400">Ctrl+S</span>
               </button>
+              {onSaveProjectAs && (
+                <button
+                  onClick={() => { onSaveProjectAs(); setActiveMenu(null); }}
+                  className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-2"><Download size={13} /> Save Project As...</span>
+                  <span className="text-[9px] text-gray-400">Ctrl+Shift+S</span>
+                </button>
+              )}
               <button
-                onClick={() => { projectInputRef.current?.click(); }}
+                onClick={() => {
+                  if (onOpenProjectPicker) {
+                    onOpenProjectPicker();
+                  } else {
+                    projectInputRef.current?.click();
+                  }
+                  setActiveMenu(null);
+                }}
                 className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
               >
                 <span className="flex items-center gap-2"><Upload size={13} /> Open Project (.ads)...</span>
+                <span className="text-[9px] text-gray-400">Ctrl+O</span>
               </button>
+              {onCloseCanvas && (
+                <button
+                  onClick={() => { onCloseCanvas(); setActiveMenu(null); }}
+                  className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-2"><X size={13} /> Close Canvas</span>
+                  <span className="text-[9px] text-gray-400">Ctrl+W</span>
+                </button>
+              )}
               <div className="h-[1px] bg-[#3a3a3a] my-1" />
               <button
                 onClick={() => { onExportPng(); setActiveMenu(null); }}
