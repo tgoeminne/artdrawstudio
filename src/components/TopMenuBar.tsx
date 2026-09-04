@@ -14,6 +14,7 @@ import {
   Trash2,
   Layers,
   Sparkles,
+  PenTool,
 } from 'lucide-react';
 
 interface TopMenuBarProps {
@@ -35,6 +36,7 @@ interface TopMenuBarProps {
   onApplyFilter: (filterType: 'invert' | 'grayscale' | 'manga_tone' | 'blur') => void;
   onSelectAll: () => void;
   onDeselect: () => void;
+  onOpenBrushMenu?: () => void;
 }
 
 export const TopMenuBar: React.FC<TopMenuBarProps> = ({
@@ -56,6 +58,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   onApplyFilter,
   onSelectAll,
   onDeselect,
+  onOpenBrushMenu,
 }) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
@@ -343,6 +346,32 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               >
                 <RotateCw size={13} /> Rotate 90° Clockwise
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* WINDOW */}
+        <div className="relative">
+          <button
+            id="menu-window-btn"
+            onClick={() => handleFileClick('window')}
+            className={`px-2 py-0.5 rounded ${activeMenu === 'window' ? 'bg-[#3d3d3d] text-white' : 'text-[#d1d1d1] hover:text-white'}`}
+          >
+            Window
+          </button>
+          {activeMenu === 'window' && (
+            <div className="absolute top-7 left-0 w-56 bg-[#252525] border border-black shadow-2xl py-1 text-[11px] text-[#d1d1d1] rounded z-50 flex flex-col">
+              {onOpenBrushMenu && (
+                <button
+                  onClick={() => { onOpenBrushMenu(); setActiveMenu(null); }}
+                  className="px-3 py-1.5 text-left hover:bg-[#4a90e2] hover:text-white flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-2 text-blue-400">
+                    <PenTool size={13} /> Sub Tool [Brush Selection]
+                  </span>
+                  <span className="text-[9px] text-gray-400 font-mono">B</span>
+                </button>
+              )}
             </div>
           )}
         </div>

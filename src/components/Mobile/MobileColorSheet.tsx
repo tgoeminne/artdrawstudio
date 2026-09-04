@@ -149,10 +149,10 @@ export const MobileColorSheet: React.FC<MobileColorSheetProps> = ({
 
     ctx.clearRect(0, 0, size, size);
 
-    // 1. Draw outer hue ring
+    // 1. Draw outer hue ring (0deg / Red starts at 12 o'clock, rotating clockwise)
     for (let angle = 0; angle < 360; angle += 1) {
-      const startAngle = ((angle - 0.5) * Math.PI) / 180;
-      const endAngle = ((angle + 1.5) * Math.PI) / 180;
+      const startAngle = ((angle - 90 - 0.5) * Math.PI) / 180;
+      const endAngle = ((angle - 90 + 1.5) * Math.PI) / 180;
       ctx.beginPath();
       ctx.arc(center, center, (outerRadius + innerRadius) / 2, startAngle, endAngle);
       const rgb = hsvToRgb(angle, 1, 1);
@@ -161,11 +161,11 @@ export const MobileColorSheet: React.FC<MobileColorSheetProps> = ({
       ctx.stroke();
     }
 
-    // Outer ring marker for selected hue
+    // Outer ring marker for selected hue (aligned to 12 o'clock clockwise)
     const hueRad = (hsv.h * Math.PI) / 180;
     const markerRadius = (outerRadius + innerRadius) / 2;
-    const markerX = center + Math.cos(hueRad) * markerRadius;
-    const markerY = center + Math.sin(hueRad) * markerRadius;
+    const markerX = center + Math.sin(hueRad) * markerRadius;
+    const markerY = center - Math.cos(hueRad) * markerRadius;
 
     ctx.beginPath();
     ctx.arc(markerX, markerY, 5, 0, Math.PI * 2);
@@ -224,8 +224,8 @@ export const MobileColorSheet: React.FC<MobileColorSheetProps> = ({
     const boxTop = Math.floor(center - boxSize / 2);
 
     if (dist >= innerRadius - 4 && dist <= outerRadius + 8) {
-      // Dragging hue ring
-      let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+      // Dragging hue ring (0deg at 12 o'clock, clockwise)
+      let angle = (Math.atan2(dx, -dy) * 180) / Math.PI;
       if (angle < 0) angle += 360;
       const newHsv = { ...hsv, h: angle };
       setHsv(newHsv);

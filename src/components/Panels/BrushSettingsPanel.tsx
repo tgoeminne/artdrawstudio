@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sliders, CheckSquare, Square as SquareIcon, Sparkles } from 'lucide-react';
+import { Sliders, CheckSquare, Square as SquareIcon, Sparkles, ExternalLink, List, Settings } from 'lucide-react';
 import { BrushSettings, BrushTipShape } from '../../types';
 import { DEFAULT_BRUSH_PRESETS } from '../../utils/brushPresets';
 import { BrushStrokePreview } from '../BrushStrokePreview';
@@ -8,16 +8,19 @@ interface BrushSettingsPanelProps {
   brush: BrushSettings;
   onUpdateBrush: (newSettings: Partial<BrushSettings>) => void;
   onSelectPreset: (preset: BrushSettings) => void;
+  onOpenBrushMenu?: () => void;
 }
 
 export const BrushSettingsPanel: React.FC<BrushSettingsPanelProps> = ({
   brush,
   onUpdateBrush,
   onSelectPreset,
+  onOpenBrushMenu,
 }) => {
   const [activeCategory, setActiveCategory] = useState<
     'all' | 'watercolor' | 'paint' | 'ink' | 'pencil' | 'airbrush'
   >('all');
+  const [panelViewMode, setPanelViewMode] = useState<'properties' | 'previews'>('properties');
 
   const filteredPresets =
     activeCategory === 'all'
@@ -36,10 +39,48 @@ export const BrushSettingsPanel: React.FC<BrushSettingsPanelProps> = ({
     <div id="panel-brush-settings" className="h-[280px] flex flex-col border-b border-black select-none bg-[#282828]">
       {/* Panel Header */}
       <div className="bg-[#363636] px-2 py-1 text-[10px] uppercase font-bold border-b border-black flex justify-between items-center text-gray-300">
-        <span className="flex items-center gap-1">
-          <Sliders size={11} /> Sub Tool [Brush]
+        <span className="flex items-center gap-1.5">
+          <Sliders size={11} />
+          <span>Sub Tool [Brush]</span>
         </span>
-        <span className="text-[#4a90e2] font-semibold truncate max-w-[130px]">{brush.name}</span>
+        <div className="flex items-center gap-1">
+          {/* Toggle between Sliders and Previews inside the panel */}
+          <div className="flex bg-[#222] rounded p-0.5 border border-white/5 mr-1">
+            <button
+              onClick={() => setPanelViewMode('properties')}
+              className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                panelViewMode === 'properties'
+                  ? 'bg-[#4a90e2] text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+              title="Tool Properties (Sliders & Dynamics)"
+            >
+              Properties
+            </button>
+            <button
+              onClick={() => setPanelViewMode('previews')}
+              className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                panelViewMode === 'previews'
+                  ? 'bg-[#4a90e2] text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+              title="Browse Preset Strokes with Previews"
+            >
+              Previews
+            </button>
+          </div>
+
+          {/* Open full detached Brush Selection Window */}
+          {onOpenBrushMenu && (
+            <button
+              onClick={onOpenBrushMenu}
+              className="p-1 text-[#4a90e2] hover:text-white hover:bg-[#4a90e2]/30 rounded transition-colors"
+              title="Open Floating Brush Selection Menu"
+            >
+              <ExternalLink size={11} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* S-Curve Preview Banner for Active Brush */}
@@ -50,7 +91,12 @@ export const BrushSettingsPanel: React.FC<BrushSettingsPanelProps> = ({
             <BrushStrokePreview brush={brush} width={130} height={26} />
           </div>
         </div>
-        <span className="text-[9px] font-mono text-cyan-400 font-bold">{brush.size}px</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-blue-400 font-semibold truncate max-w-[80px]">
+            {brush.name}
+          </span>
+          <span className="text-[9px] font-mono text-cyan-400 font-bold">{brush.size}px</span>
+        </div>
       </div>
 
       {/* Preset Sub-tool categories / Quick Switcher */}
@@ -68,26 +114,58 @@ export const BrushSettingsPanel: React.FC<BrushSettingsPanelProps> = ({
         ))}
       </div>
 
-      {/* Preset Pills List */}
-      <div className="h-9 bg-[#232323] border-b border-black px-2 flex items-center gap-1.5 overflow-x-auto text-[10px] no-scrollbar">
-        {filteredPresets.map((preset) => (
-          <button
-            key={preset.id}
-            onClick={() => onSelectPreset(preset)}
-            className={`px-2 py-1 rounded text-nowrap whitespace-nowrap transition-colors flex items-center gap-1 border ${
-              brush.id === preset.id
-                ? 'bg-[#383838] border-[#4a90e2] text-white shadow-xs'
-                : 'border-transparent text-gray-400 hover:text-white hover:bg-[#2d2d2d]'
-            }`}
-          >
-            <span className="text-[8px] text-[#4a90e2]">●</span>
-            {preset.name}
-          </button>
-        ))}
-      </div>
+      {panelViewMode === 'previews' ? (
+        /* INLINE BRUSH PREVIEWS LIST */
+        <div className="flex-1 p-1.5 overflow-y-auto no-scrollbar flex flex-col gap-1 bg-[#1c1c1c]">
+          {filteredPresets.map((preset) => {
+            const isSelected = brush.name === preset.name || brush.id === preset.id;
+            return (
+              <button
+                key={preset.id}
+                onClick={() => onSelectPreset(preset)}
+                className={`flex items-center justify-between p-1 rounded-md border text-left transition-all ${
+                  isSelected
+                    ? 'bg-[#273d57] border-[#4a90e2] text-white shadow-xs'
+                    : 'bg-[#252525] border-transparent text-gray-300 hover:bg-[#2e2e2e] hover:border-gray-600'
+                }`}
+              >
+                <div className="w-24 h-6 rounded bg-[#151515] border border-black/80 overflow-hidden shrink-0 mr-1.5 shadow-inner">
+                  <BrushStrokePreview brush={preset} width={96} height={24} strokeColor="#ffffff" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-semibold truncate leading-tight">{preset.name}</div>
+                  <div className="text-[9px] text-gray-400 font-mono flex items-center gap-1">
+                    <span>{preset.size}px</span>
+                    <span>•</span>
+                    <span className="capitalize">{preset.tipShape}</span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <>
+          {/* Preset Pills List */}
+          <div className="h-8 bg-[#232323] border-b border-black px-2 flex items-center gap-1.5 overflow-x-auto text-[10px] no-scrollbar">
+            {filteredPresets.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => onSelectPreset(preset)}
+                className={`px-2 py-0.5 rounded text-nowrap whitespace-nowrap transition-colors flex items-center gap-1 border ${
+                  brush.id === preset.id
+                    ? 'bg-[#383838] border-[#4a90e2] text-white shadow-xs'
+                    : 'border-transparent text-gray-400 hover:text-white hover:bg-[#2d2d2d]'
+                }`}
+              >
+                <span className="text-[8px] text-[#4a90e2]">●</span>
+                {preset.name}
+              </button>
+            ))}
+          </div>
 
-      {/* Customizable Brush Engine Parameters */}
-      <div className="flex-1 p-2.5 text-[11px] flex flex-col gap-2 overflow-y-auto no-scrollbar">
+          {/* Customizable Brush Engine Parameters */}
+          <div className="flex-1 p-2.5 text-[11px] flex flex-col gap-2 overflow-y-auto no-scrollbar">
         {/* Brush Size */}
         <div className="flex flex-col gap-0.5">
           <div className="flex justify-between items-center text-[10px]">
@@ -452,6 +530,8 @@ export const BrushSettingsPanel: React.FC<BrushSettingsPanelProps> = ({
           )}
         </div>
       </div>
-    </div>
-  );
+      </>
+    )}
+  </div>
+);
 };

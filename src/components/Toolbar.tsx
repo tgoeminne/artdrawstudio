@@ -12,8 +12,10 @@ import {
   ArrowLeftRight,
   CircleDot,
   Minus,
+  Layers,
 } from 'lucide-react';
-import { ToolType } from '../types';
+import { ToolType, BrushSettings } from '../types';
+import { BrushStrokePreview } from './BrushStrokePreview';
 
 interface ToolbarProps {
   activeTool: ToolType;
@@ -24,6 +26,9 @@ interface ToolbarProps {
   onSwapColors: () => void;
   onToggleTransparentMode: () => void;
   onPrimaryColorChange: (color: string) => void;
+  activeBrush?: BrushSettings;
+  onOpenBrushMenu?: () => void;
+  isBrushMenuOpen?: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -34,6 +39,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   isTransparentMode,
   onSwapColors,
   onToggleTransparentMode,
+  activeBrush,
+  onOpenBrushMenu,
+  isBrushMenuOpen,
 }) => {
   const tools: { id: ToolType; label: string; icon: React.ReactNode; shortcut: string }[] = [
     { id: 'brush', label: 'Pen & Brush', icon: <PenTool size={16} />, shortcut: 'P' },
@@ -57,12 +65,19 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <div className="flex flex-col gap-1 w-full items-center">
         {tools.map((tool) => {
           const isActive = activeTool === tool.id;
+          const isBrushTool = tool.id === 'brush' || tool.id === 'pencil' || tool.id === 'airbrush';
           return (
             <button
               key={tool.id}
               id={`tool-${tool.id}`}
-              onClick={() => onSelectTool(tool.id)}
-              title={`${tool.label} (${tool.shortcut})`}
+              onClick={() => {
+                if (isActive && isBrushTool && onOpenBrushMenu) {
+                  onOpenBrushMenu();
+                } else {
+                  onSelectTool(tool.id);
+                }
+              }}
+              title={`${tool.label} (${tool.shortcut})${isBrushTool ? ' - Click to switch or open brush menu' : ''}`}
               className={`p-2 rounded transition-all duration-100 relative group flex items-center justify-center ${
                 isActive
                   ? 'bg-[#4a90e2] text-white shadow-sm'
@@ -70,6 +85,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               }`}
             >
               {tool.icon}
+              {/* Little indicator dot for tools with subtool menus */}
+              {isBrushTool && (
+                <span className="absolute bottom-1 right-1 w-1 h-1 rounded-full bg-white/40" />
+              )}
               {/* Tooltip */}
               <span className="absolute left-12 px-2 py-0.5 bg-black/90 text-white text-[10px] rounded whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
                 {tool.label} <span className="text-gray-400">({tool.shortcut})</span>
@@ -78,6 +97,38 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           );
         })}
       </div>
+
+      {/* Sub Tool [Brush Selection] Dedicated Shortcut Button with Active Stroke Preview */}
+      {onOpenBrushMenu && activeBrush && (
+        <div className="w-full px-1.5 flex flex-col items-center pt-1 border-t border-white/5">
+          <button
+            id="btn-toolbar-subtool-brushes"
+            onClick={onOpenBrushMenu}
+            title={`Sub Tool: Brush Selection (${activeBrush.name})`}
+            className={`w-9 h-11 rounded flex flex-col items-center justify-center relative group transition-all border ${
+              isBrushMenuOpen
+                ? 'bg-[#273d57] border-[#4a90e2] text-white shadow-md ring-1 ring-[#4a90e2]/50'
+                : 'bg-[#212121] border-black text-gray-300 hover:bg-[#333] hover:border-gray-500 hover:text-white'
+            }`}
+          >
+            {/* Live Micro Stroke Preview */}
+            <div className="w-7 h-3 rounded bg-[#131313] border border-black/80 overflow-hidden mb-1 flex items-center justify-center shadow-inner">
+              <BrushStrokePreview brush={activeBrush} width={28} height={12} strokeColor="#ffffff" />
+            </div>
+            <span className="text-[8px] font-bold font-mono text-[#4a90e2] leading-none">
+              SUB
+            </span>
+            <span className="text-[7px] text-gray-400 leading-none mt-0.5 font-mono">
+              {activeBrush.size}px
+            </span>
+
+            {/* Hover Tooltip */}
+            <span className="absolute left-12 px-2 py-0.5 bg-black/90 text-white text-[10px] rounded whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
+              Sub Tool: Brush Selection &amp; Previews
+            </span>
+          </button>
+        </div>
+      )}
 
       <div className="flex-1" />
 

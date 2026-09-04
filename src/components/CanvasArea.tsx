@@ -63,6 +63,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   onColorSampled,
   onStrokeEnd,
   onCursorMove,
+  onStylusUpdate,
   isSpacePressed,
   touchSettings,
 }) => {

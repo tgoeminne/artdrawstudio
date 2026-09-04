@@ -36,6 +36,7 @@ import { MobileLayersSheet } from './components/Mobile/MobileLayersSheet';
 import { MobileActionsSheet } from './components/Mobile/MobileActionsSheet';
 import { MobileMenuDrawer } from './components/Mobile/MobileMenuDrawer';
 import { TouchCalibrationModal } from './components/Mobile/TouchCalibrationModal';
+import { DesktopBrushSelectionMenu } from './components/DesktopBrushSelectionMenu';
 
 // Helper to create a new raster or vector layer object
 function createLayerObject(
@@ -142,6 +143,7 @@ export default function App() {
   });
   const [isTouchCalibModalOpen, setIsTouchCalibModalOpen] = useState(false);
   const [stylusState, setStylusState] = useState<WacomStylusState | null>(null);
+  const [isDesktopBrushMenuOpen, setIsDesktopBrushMenuOpen] = useState(false);
 
   const handleUpdateTouchSettings = (updates: Partial<TouchCalibrationSettings>) => {
     setTouchSettings((prev) => {
@@ -863,8 +865,14 @@ export default function App() {
 
       // Tool hotkeys
       switch (e.key.toLowerCase()) {
-        case 'p':
         case 'b':
+          if (activeTool === 'brush') {
+            setIsDesktopBrushMenuOpen((prev) => !prev);
+          } else {
+            setActiveTool('brush');
+          }
+          break;
+        case 'p':
           setActiveTool('brush');
           break;
         case 'n':
@@ -1120,6 +1128,7 @@ export default function App() {
             onDeselect={() =>
               setSelection({ x: 0, y: 0, width: 0, height: 0, active: false })
             }
+            onOpenBrushMenu={() => setIsDesktopBrushMenuOpen((prev) => !prev)}
           />
 
           {/* Main Workspace Area (Toolbar + Canvas + Panels Dock) */}
@@ -1134,6 +1143,9 @@ export default function App() {
               onSwapColors={handleSwapColors}
               onToggleTransparentMode={handleToggleTransparentMode}
               onPrimaryColorChange={setPrimaryColor}
+              activeBrush={brush}
+              onOpenBrushMenu={() => setIsDesktopBrushMenuOpen((prev) => !prev)}
+              isBrushMenuOpen={isDesktopBrushMenuOpen}
             />
 
             {/* 3. Center Canvas Workspace */}
@@ -1149,6 +1161,9 @@ export default function App() {
                 onToggleMobileLayout={() => setLayoutMode('mobile')}
                 isMobileLayout={false}
                 onOpenTouchCalibration={() => setIsTouchCalibModalOpen(true)}
+                activeBrush={brush}
+                onOpenBrushMenu={() => setIsDesktopBrushMenuOpen((prev) => !prev)}
+                isBrushMenuOpen={isDesktopBrushMenuOpen}
               />
 
               {/* Interactive Multi-layer Canvas Area */}
@@ -1200,6 +1215,7 @@ export default function App() {
                 brush={brush}
                 onUpdateBrush={(updates) => setBrush((prev) => ({ ...prev, ...updates }))}
                 onSelectPreset={(preset) => setBrush(preset)}
+                onOpenBrushMenu={() => setIsDesktopBrushMenuOpen((prev) => !prev)}
               />
 
               {/* Bottom Panel: Multi-layer Workspace */}
@@ -1236,6 +1252,19 @@ export default function App() {
             onOpenWacomSettings={() => setIsTouchCalibModalOpen(true)}
             onZoomChange={(newZoom) => setTransform((prev) => ({ ...prev, zoom: newZoom }))}
             onResetView={handleResetView}
+          />
+
+          {/* 6. Desktop Brush Selection Sub Tool Floating Window (with live previews per brush) */}
+          <DesktopBrushSelectionMenu
+            isOpen={isDesktopBrushMenuOpen}
+            onClose={() => setIsDesktopBrushMenuOpen(false)}
+            activeBrush={brush}
+            onSelectBrush={(newBrush) => {
+              setBrush(newBrush);
+              setActiveTool('brush');
+            }}
+            primaryColor={primaryColor}
+            onUpdateBrushSize={(newSize) => setBrush((prev) => ({ ...prev, size: newSize }))}
           />
         </>
       )}

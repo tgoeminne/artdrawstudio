@@ -16,6 +16,7 @@ import {
   FolderOpen,
   RotateCcw,
   Palette,
+  PenTool,
 } from 'lucide-react';
 
 interface MobileBrushSheetProps {

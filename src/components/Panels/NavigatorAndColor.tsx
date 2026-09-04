@@ -144,37 +144,89 @@ export const NavigatorAndColor: React.FC<NavigatorAndColorProps> = ({
     }
   }, [primaryColor]);
 
-  // Handle HSV Wheel interactions
-  const handleWheelClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Update Hue from mouse/pointer position relative to wheel center
+  const updateHueFromCoords = (clientX: number, clientY: number) => {
     if (!wheelRef.current) return;
     const rect = wheelRef.current.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const x = e.clientX - rect.left - centerX;
-    const y = e.clientY - rect.top - centerY;
-    let angle = (Math.atan2(y, x) * 180) / Math.PI;
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    // conic-gradient(from 0deg, #f00...) starts at 12 o'clock (0deg) and rotates clockwise.
+    // atan2(dx, -dy) yields 0deg at 12 o'clock (dx=0, dy<0) and increases clockwise.
+    let angle = (Math.atan2(dx, -dy) * 180) / Math.PI;
     if (angle < 0) angle += 360;
 
-    const newHsv = { ...hsv, h: angle };
-    setHsv(newHsv);
-    const rgb = hsvToRgb(newHsv.h, newHsv.s, newHsv.v);
-    onColorChange(rgbToHex(rgb.r, rgb.g, rgb.b));
+    setHsv((prev) => {
+      const next = { ...prev, h: angle };
+      const rgb = hsvToRgb(next.h, next.s, next.v);
+      onColorChange(rgbToHex(rgb.r, rgb.g, rgb.b));
+      return next;
+    });
+  };
+
+  // Handle HSV Wheel interactions (with drag support and inner box exclusion)
+  const handleWheelMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!wheelRef.current) return;
+    const rect = wheelRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = e.clientX - centerX;
+    const dy = e.clientY - centerY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const radius = rect.width / 2;
+
+    // Ignore clicks in the center square area (let the SV box handle its own events)
+    if (dist < radius * 0.55) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    updateHueFromCoords(e.clientX, e.clientY);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      updateHueFromCoords(ev.clientX, ev.clientY);
+    };
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
   // Handle SV Square Box dragging
-  const handleSvDrag = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!svBoxRef.current) return;
-    const rect = svBoxRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+  const handleSvMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation(); // Stop event from bubbling to outer wheelRef
 
-    const s = x / rect.width;
-    const v = 1 - y / rect.height;
+    const updateSv = (clientX: number, clientY: number) => {
+      if (!svBoxRef.current) return;
+      const rect = svBoxRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+      const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
 
-    const newHsv = { ...hsv, s, v };
-    setHsv(newHsv);
-    const rgb = hsvToRgb(newHsv.h, newHsv.s, newHsv.v);
-    onColorChange(rgbToHex(rgb.r, rgb.g, rgb.b));
+      const s = x / rect.width;
+      const v = 1 - y / rect.height;
+
+      setHsv((prev) => {
+        const next = { ...prev, s, v };
+        const rgb = hsvToRgb(next.h, next.s, next.v);
+        onColorChange(rgbToHex(rgb.r, rgb.g, rgb.b));
+        return next;
+      });
+    };
+
+    updateSv(e.clientX, e.clientY);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      updateSv(ev.clientX, ev.clientY);
+    };
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
   const pureHueRgb = hsvToRgb(hsv.h, 1, 1);
@@ -211,40 +263,18 @@ export const NavigatorAndColor: React.FC<NavigatorAndColorProps> = ({
             {/* HSV Color Wheel Ring */}
             <div
               ref={wheelRef}
-              onClick={handleWheelClick}
+              onMouseDown={handleWheelMouseDown}
               className="w-24 h-24 rounded-full p-2 border border-black shadow-inner relative cursor-crosshair flex items-center justify-center"
               style={{
                 background:
                   'conic-gradient(from 0deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
               }}
-              title="Click color wheel ring to select Hue"
+              title="Click or drag on outer color wheel ring to select Hue"
             >
               {/* Inner Saturation / Value Box */}
               <div
                 ref={svBoxRef}
-                onMouseDown={(e) => {
-                  handleSvDrag(e);
-                  const onMouseMove = (ev: MouseEvent) => {
-                    if (!svBoxRef.current) return;
-                    const rect = svBoxRef.current.getBoundingClientRect();
-                    const x = Math.max(0, Math.min(rect.width, ev.clientX - rect.left));
-                    const y = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
-                    const s = x / rect.width;
-                    const v = 1 - y / rect.height;
-                    setHsv((prev) => {
-                      const next = { ...prev, s, v };
-                      const rgb = hsvToRgb(next.h, next.s, next.v);
-                      onColorChange(rgbToHex(rgb.r, rgb.g, rgb.b));
-                      return next;
-                    });
-                  };
-                  const onMouseUp = () => {
-                    window.removeEventListener('mousemove', onMouseMove);
-                    window.removeEventListener('mouseup', onMouseUp);
-                  };
-                  window.addEventListener('mousemove', onMouseMove);
-                  window.addEventListener('mouseup', onMouseUp);
-                }}
+                onMouseDown={handleSvMouseDown}
                 className="w-14 h-14 border border-black relative cursor-crosshair overflow-hidden shadow-inner"
                 style={{
                   backgroundColor: pureHueHex,
@@ -255,7 +285,7 @@ export const NavigatorAndColor: React.FC<NavigatorAndColorProps> = ({
               >
                 {/* SV Picker Needle Circle */}
                 <div
-                  className="w-2 h-2 border border-white rounded-full absolute -translate-x-1/2 -translate-y-1/2 shadow pointer-events-none"
+                  className="w-2.5 h-2.5 border-2 border-white rounded-full absolute -translate-x-1/2 -translate-y-1/2 shadow pointer-events-none ring-1 ring-black/60"
                   style={{
                     left: `${hsv.s * 100}%`,
                     top: `${(1 - hsv.v) * 100}%`,
@@ -264,12 +294,12 @@ export const NavigatorAndColor: React.FC<NavigatorAndColorProps> = ({
                 />
               </div>
 
-              {/* Hue Angle Indicator Marker on outer ring */}
+              {/* Hue Angle Indicator Marker on outer ring (0deg is at 12 o'clock / top) */}
               <div
-                className="absolute w-2 h-2 border-2 border-white rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none shadow"
+                className="absolute w-2.5 h-2.5 border-2 border-white rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none shadow ring-1 ring-black/80"
                 style={{
-                  left: `${50 + 44 * Math.cos((hsv.h * Math.PI) / 180)}%`,
-                  top: `${50 + 44 * Math.sin((hsv.h * Math.PI) / 180)}%`,
+                  left: `${50 + 42 * Math.sin((hsv.h * Math.PI) / 180)}%`,
+                  top: `${50 - 42 * Math.cos((hsv.h * Math.PI) / 180)}%`,
                   backgroundColor: pureHueHex,
                 }}
               />
