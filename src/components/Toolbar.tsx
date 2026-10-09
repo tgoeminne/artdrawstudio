@@ -13,6 +13,7 @@ import {
   CircleDot,
   Minus,
   Layers,
+  Type,
 } from 'lucide-react';
 import { ToolType, BrushSettings } from '../types';
 import { BrushStrokePreview } from './BrushStrokePreview';
@@ -44,9 +45,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   isBrushMenuOpen,
 }) => {
   const tools: { id: ToolType; label: string; icon: React.ReactNode; shortcut: string }[] = [
-    { id: 'brush', label: 'Pen & Brush', icon: <PenTool size={16} />, shortcut: 'P' },
-    { id: 'pencil', label: 'Pencil', icon: <Minus size={16} className="-rotate-45" />, shortcut: 'N' },
-    { id: 'airbrush', label: 'Airbrush & Blend', icon: <Paintbrush size={16} />, shortcut: 'B' },
+    { id: 'brush', label: 'Brush presets', icon: <PenTool size={16} />, shortcut: 'B' },
+    { id: 'vector', label: 'Vector pen', icon: <PenTool size={16} />, shortcut: 'V' },
+    { id: 'text', label: 'Text', icon: <Type size={16} />, shortcut: 'T' },
     { id: 'eraser', label: 'Eraser', icon: <Eraser size={16} />, shortcut: 'E' },
     { id: 'bucket', label: 'Fill / Paint Bucket', icon: <PaintBucket size={16} />, shortcut: 'G' },
     { id: 'eyedropper', label: 'Eyedropper', icon: <Pipette size={16} />, shortcut: 'I' },
@@ -65,7 +66,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <div className="flex flex-col gap-1 w-full items-center">
         {tools.map((tool) => {
           const isActive = activeTool === tool.id;
-          const isBrushTool = tool.id === 'brush' || tool.id === 'pencil' || tool.id === 'airbrush';
+          const isBrushTool = tool.id === 'brush';
           return (
             <button
               key={tool.id}

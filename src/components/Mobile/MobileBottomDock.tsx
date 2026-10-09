@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   PenTool,
-  Paintbrush,
   Eraser,
   PaintBucket,
   Pipette,
@@ -15,6 +14,7 @@ import {
   ArrowLeftRight,
   CircleDot,
   Wand2,
+  Type,
 } from 'lucide-react';
 import { ToolType, BrushSettings } from '../../types';
 
@@ -55,10 +55,10 @@ export const MobileBottomDock: React.FC<MobileBottomDockProps> = ({
     switch (tool) {
       case 'brush':
         return <PenTool size={18} />;
-      case 'pencil':
-        return <Minus size={18} className="-rotate-45" />;
-      case 'airbrush':
-        return <Paintbrush size={18} />;
+      case 'vector':
+        return <PenTool size={18} />;
+      case 'text':
+        return <Type size={18} />;
       case 'eraser':
         return <Eraser size={18} />;
       case 'bucket':
@@ -81,11 +81,11 @@ export const MobileBottomDock: React.FC<MobileBottomDockProps> = ({
   const getToolLabel = (tool: ToolType) => {
     switch (tool) {
       case 'brush':
-        return 'Pen';
-      case 'pencil':
-        return 'Pencil';
-      case 'airbrush':
-        return 'Airbrush';
+        return 'Brush';
+      case 'vector':
+        return 'Vector';
+      case 'text':
+        return 'Text';
       case 'eraser':
         return 'Eraser';
       case 'bucket':

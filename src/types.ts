@@ -1,7 +1,7 @@
 export type ToolType =
   | 'brush'
-  | 'pencil'
-  | 'airbrush'
+  | 'vector'
+  | 'text'
   | 'eraser'
   | 'bucket'
   | 'eyedropper'
@@ -41,6 +41,54 @@ export interface VectorStroke {
   timestamp: number;
 }
 
+export interface VectorNode {
+  x: number;
+  y: number;
+  type?: 'corner' | 'smooth' | 'symmetric';
+  handleIn?: { x: number; y: number }; // Absolute canvas coords
+  handleOut?: { x: number; y: number }; // Absolute canvas coords
+}
+
+export interface VectorPath {
+  id: string;
+  nodes: VectorNode[];
+  closed: boolean;
+  strokeColor: string;
+  strokeWidth: number;
+  strokeDash?: 'solid' | 'dashed' | 'dotted';
+  strokeCap?: 'round' | 'butt' | 'square';
+  strokeJoin?: 'round' | 'miter' | 'bevel';
+  fillColor: string; // 'none' or hex/rgba
+  fillRule?: 'nonzero' | 'evenodd';
+  opacity?: number;
+  timestamp?: number;
+}
+
+export interface VectorText {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  bold?: boolean;
+  italic?: boolean;
+  fontWeight?: number | string; // 100 to 900
+  letterSpacing?: number;
+  underline?: boolean;
+  strikethrough?: boolean;
+  uppercase?: boolean;
+  align: CanvasTextAlign;
+  lineHeight: number;
+  strokeColor?: string;
+  strokeWidth?: number;
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+}
+
 export interface Layer {
   id: string;
   name: string;
@@ -53,6 +101,8 @@ export interface Layer {
   ctx: CanvasRenderingContext2D;
   thumbnail?: string;
   vectorStrokes?: VectorStroke[];
+  vectorTexts?: VectorText[];
+  vectorPaths?: VectorPath[];
 }
 
 export type BrushTipShape = 'round' | 'chisel' | 'calligraphy' | 'stipple' | 'flat';
@@ -161,6 +211,8 @@ export interface HistoryStep {
     name: string;
     type?: LayerType;
     vectorStrokes?: VectorStroke[];
+    vectorTexts?: VectorText[];
+    vectorPaths?: VectorPath[];
     visible: boolean;
     locked: boolean;
     opacity: number;

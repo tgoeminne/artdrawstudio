@@ -3,6 +3,8 @@ import {
   Layer,
   LayerType,
   VectorStroke,
+  VectorPath,
+  VectorNode,
   ToolType,
   BrushSettings,
   CanvasTransform,
@@ -11,6 +13,7 @@ import {
   WacomStylusState,
   CanvasDocument,
   HistoryStep,
+  VectorText,
 } from './types';
 import { DEFAULT_BRUSH_PRESETS } from './utils/brushPresets';
 import {
@@ -18,7 +21,12 @@ import {
   adjustVectorStrokeWidths,
   scaleVectorLayer,
   reRenderVectorLayer,
+  renderVectorText,
 } from './utils/vectorEngine';
+import { preloadProjectFonts, loadGoogleFont } from './utils/googleFonts';
+import { VectorCadBar, VectorCadMode } from './components/VectorCadBar';
+import { TextQuickBar } from './components/TextQuickBar';
+import { GoogleFontLibraryModal } from './components/GoogleFontLibraryModal';
 import { TopMenuBar } from './components/TopMenuBar';
 import { Toolbar } from './components/Toolbar';
 import { CanvasTabBar } from './components/CanvasTabBar';
@@ -40,6 +48,7 @@ import { MobileMenuDrawer } from './components/Mobile/MobileMenuDrawer';
 import { TouchCalibrationModal } from './components/Mobile/TouchCalibrationModal';
 import { DesktopBrushSelectionMenu } from './components/DesktopBrushSelectionMenu';
 import { SavePromptModal } from './components/SavePromptModal';
+import { TextToolDialog } from './components/TextToolDialog';
 import {
   isFileSystemAccessSupported,
   openProjectWithPicker,
@@ -70,6 +79,8 @@ function createLayerObject(
     name,
     type,
     vectorStrokes: type === 'vector' ? [] : undefined,
+    vectorTexts: type === 'vector' ? [] : undefined,
+    vectorPaths: type === 'vector' ? [] : undefined,
     visible: true,
     locked: false,
     opacity: 1.0,
@@ -99,6 +110,8 @@ function cloneLayers(sourceLayers: Layer[]): Layer[] {
       canvas: clonedCanvas,
       ctx,
       vectorStrokes: l.vectorStrokes ? JSON.parse(JSON.stringify(l.vectorStrokes)) : undefined,
+      vectorTexts: l.vectorTexts ? JSON.parse(JSON.stringify(l.vectorTexts)) : undefined,
+      vectorPaths: l.vectorPaths ? JSON.parse(JSON.stringify(l.vectorPaths)) : undefined,
     };
   });
 }
@@ -153,6 +166,20 @@ function createBlankDocument(name = 'Canvas_01.ads', width = 1200, height = 900,
 }
 
 export default function App() {
+  const studioRoot = typeof document !== 'undefined' ? document.getElementById('root') : null;
+  const studioApiBase = studioRoot?.dataset.apiBase || '';
+  const studioPermission = studioRoot?.dataset.projectPermission || 'owner';
+  const isTsgStudio = studioApiBase !== '';
+  const [studioProjectId, setStudioProjectId] = useState(studioRoot?.dataset.projectId || '');
+  const [studioVersion, setStudioVersion] = useState(0);
+  const [studioNotice, setStudioNotice] = useState('');
+  const [studioBusy, setStudioBusy] = useState(Boolean(studioRoot?.dataset.projectId));
+  const [studioShareOpen, setStudioShareOpen] = useState(false);
+  const [studioShares, setStudioShares] = useState<Array<{ id: number; email: string; username: string; permission: string }>>([]);
+  const [studioRecipient, setStudioRecipient] = useState('');
+  const [studioSharePermission, setStudioSharePermission] = useState<'viewer' | 'editor'>('viewer');
+  const [studioDesignUrl, setStudioDesignUrl] = useState('');
+
   // Documents (Multi-Canvas Tabs)
   const [initialDoc] = useState<CanvasDocument>(() => createInitialDocument());
   const [documents, setDocuments] = useState<CanvasDocument[]>([initialDoc]);
@@ -177,7 +204,10 @@ export default function App() {
 
   // Tools & Brushes
   const [activeTool, setActiveTool] = useState<ToolType>('brush');
-  const [brush, setBrush] = useState<BrushSettings>(DEFAULT_BRUSH_PRESETS[0]);
+  const [textPlacement, setTextPlacement] = useState<{ x: number; y: number } | null>(null);
+  const [brush, setBrush] = useState<BrushSettings>(() =>
+    DEFAULT_BRUSH_PRESETS.find((preset) => preset.id === 'g-pen') || DEFAULT_BRUSH_PRESETS[0]
+  );
   const [primaryColor, setPrimaryColor] = useState('#1e293b');
   const [secondaryColor, setSecondaryColor] = useState('#ffffff');
   const [isTransparentMode, setIsTransparentMode] = useState(false);
@@ -236,6 +266,28 @@ export default function App() {
     fileName: string;
   } | null>(null);
 
+  // Vector CAD & Typography State
+  const [vectorCadMode, setVectorCadMode] = useState<VectorCadMode>('draw');
+  const [vectorStrokeColor, setVectorStrokeColor] = useState<string>('#3b82f6');
+  const [vectorStrokeWidth, setVectorStrokeWidth] = useState<number>(3);
+  const [vectorStrokeDash, setVectorStrokeDash] = useState<'solid' | 'dashed' | 'dotted'>('solid');
+  const [vectorFillColor, setVectorFillColor] = useState<string>('none');
+  const [vectorIsClosed, setVectorIsClosed] = useState<boolean>(false);
+  const [isGridSnap, setIsGridSnap] = useState<boolean>(false);
+  const [isOrtho, setIsOrtho] = useState<boolean>(false);
+  const [inProgressNodes, setInProgressNodes] = useState<VectorNode[]>([]);
+  const [selectedVectorPathId, setSelectedVectorPathId] = useState<string | null>(null);
+  const [selectedNodeIndex, setSelectedNodeIndex] = useState<number | null>(null);
+
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState<VectorText | null>(null);
+  const [defaultFontFamily, setDefaultFontFamily] = useState<string>('Inter');
+  const [isGoogleFontLibraryOpen, setIsGoogleFontLibraryOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    preloadProjectFonts();
+  }, []);
+
   // Warn user before closing or reloading tab if any document has unsaved changes
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -273,8 +325,8 @@ export default function App() {
   const [canRedo, setCanRedo] = useState(false);
 
   // Capture snapshot of current layers
-  const recordHistory = useCallback(() => {
-    setIsModified(true);
+  const recordHistory = useCallback((markModified = true) => {
+    if (markModified) setIsModified(true);
     const snapshot: HistoryStep = {
       activeLayerId,
       layersSnapshot: layers.map((l) => ({
@@ -282,6 +334,8 @@ export default function App() {
         name: l.name,
         type: l.type,
         vectorStrokes: l.vectorStrokes ? JSON.parse(JSON.stringify(l.vectorStrokes)) : undefined,
+        vectorTexts: l.vectorTexts ? JSON.parse(JSON.stringify(l.vectorTexts)) : undefined,
+        vectorPaths: l.vectorPaths ? JSON.parse(JSON.stringify(l.vectorPaths)) : undefined,
         visible: l.visible,
         locked: l.locked,
         opacity: l.opacity,
@@ -309,7 +363,7 @@ export default function App() {
   // Initial history snapshot on load
   useEffect(() => {
     if (historyStackRef.current.length === 0 && layers.length > 0) {
-      recordHistory();
+      recordHistory(false);
     }
   }, [layers, recordHistory]);
 
@@ -376,11 +430,16 @@ export default function App() {
         layer.name = snap.name;
         layer.type = snap.type || 'raster';
         layer.vectorStrokes = snap.vectorStrokes ? JSON.parse(JSON.stringify(snap.vectorStrokes)) : undefined;
+        layer.vectorTexts = snap.vectorTexts ? JSON.parse(JSON.stringify(snap.vectorTexts)) : undefined;
+        layer.vectorPaths = snap.vectorPaths ? JSON.parse(JSON.stringify(snap.vectorPaths)) : undefined;
         layer.visible = snap.visible;
         layer.locked = snap.locked;
         layer.opacity = snap.opacity;
         layer.blendMode = snap.blendMode;
         layer.ctx.putImageData(snap.imageData, 0, 0);
+        if (layer.type === 'vector') {
+          reRenderVectorLayer(layer);
+        }
         updateLayerThumbnail(layer.id);
       }
     });
@@ -412,6 +471,230 @@ export default function App() {
     }, 50);
   };
 
+  const handleSelectTool = (tool: ToolType) => {
+    if (tool === 'vector' || tool === 'text') {
+      const activeLayer = layers.find((layer) => layer.id === activeLayerId);
+      if (!activeLayer || activeLayer.type !== 'vector') handleAddVectorLayer();
+    }
+    setActiveTool(tool);
+    if (tool !== 'text') setTextPlacement(null);
+  };
+
+  const ensureVectorLayer = (): Layer => {
+    let layer = layers.find((l) => l.id === activeLayerId);
+    if (!layer || layer.type !== 'vector') {
+      const newId = `layer-vector-${Date.now()}`;
+      const count = layers.filter((l) => l.type === 'vector').length + 1;
+      const newLayer = createLayerObject(newId, `Vector Layer ${count}`, canvasWidth, canvasHeight, undefined, 'vector');
+      layer = newLayer;
+      setLayers((prev) => [...prev, newLayer]);
+      setActiveLayerId(newId);
+    }
+    return layer;
+  };
+
+  const handleCommitVectorPath = (path: VectorPath) => {
+    const vLayer = ensureVectorLayer();
+    vLayer.vectorPaths = [...(vLayer.vectorPaths || []), path];
+    reRenderVectorLayer(vLayer);
+    updateLayerThumbnail(vLayer.id);
+    setLayers([...layers]);
+    setInProgressNodes([]);
+    setSelectedVectorPathId(path.id);
+    setSelectedNodeIndex(null);
+    setTimeout(() => recordHistory(), 50);
+  };
+
+  const handleUpdateVectorPath = (pathId: string, updates: Partial<VectorPath>) => {
+    for (const l of layers) {
+      if (l.vectorPaths?.some((p) => p.id === pathId)) {
+        l.vectorPaths = l.vectorPaths.map((p) => (p.id === pathId ? { ...p, ...updates } : p));
+        reRenderVectorLayer(l);
+        updateLayerThumbnail(l.id);
+        setLayers([...layers]);
+        recordHistory();
+        break;
+      }
+    }
+  };
+
+  const handleDeleteVectorPath = (pathId: string) => {
+    for (const l of layers) {
+      if (l.vectorPaths?.some((p) => p.id === pathId)) {
+        l.vectorPaths = l.vectorPaths.filter((p) => p.id !== pathId);
+        reRenderVectorLayer(l);
+        updateLayerThumbnail(l.id);
+        setLayers([...layers]);
+        if (selectedVectorPathId === pathId) {
+          setSelectedVectorPathId(null);
+          setSelectedNodeIndex(null);
+        }
+        recordHistory();
+        break;
+      }
+    }
+  };
+
+  const handleFinishInProgressPath = () => {
+    if (inProgressNodes.length < 2) return;
+    const newPath: VectorPath = {
+      id: `vpath_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      nodes: inProgressNodes,
+      closed: vectorIsClosed,
+      strokeColor: vectorStrokeColor,
+      strokeWidth: vectorStrokeWidth,
+      strokeDash: vectorStrokeDash,
+      fillColor: vectorFillColor,
+    };
+    handleCommitVectorPath(newPath);
+  };
+
+  const handleCancelInProgressPath = () => {
+    setInProgressNodes([]);
+  };
+
+  const handleToggleNodeType = (targetType?: 'corner' | 'smooth') => {
+    if (!selectedVectorPathId || selectedNodeIndex === null) return;
+    for (const l of layers) {
+      const path = l.vectorPaths?.find((p) => p.id === selectedVectorPathId);
+      if (path && path.nodes[selectedNodeIndex]) {
+        const node = path.nodes[selectedNodeIndex];
+        const newType = targetType || (node.type === 'smooth' ? 'corner' : 'smooth');
+        if (newType === 'corner') {
+          node.type = 'corner';
+          delete node.handleIn;
+          delete node.handleOut;
+        } else {
+          node.type = 'smooth';
+          if (!node.handleIn && !node.handleOut) {
+            node.handleIn = { x: node.x - 25, y: node.y };
+            node.handleOut = { x: node.x + 25, y: node.y };
+          }
+        }
+        reRenderVectorLayer(l);
+        updateLayerThumbnail(l.id);
+        setLayers([...layers]);
+        recordHistory();
+        break;
+      }
+    }
+  };
+
+  const handleDeleteSelectedNode = () => {
+    if (!selectedVectorPathId || selectedNodeIndex === null) return;
+    for (const l of layers) {
+      const path = l.vectorPaths?.find((p) => p.id === selectedVectorPathId);
+      if (path) {
+        if (path.nodes.length <= 2) {
+          handleDeleteVectorPath(selectedVectorPathId);
+        } else {
+          path.nodes.splice(selectedNodeIndex, 1);
+          reRenderVectorLayer(l);
+          updateLayerThumbnail(l.id);
+          setLayers([...layers]);
+          setSelectedNodeIndex(null);
+          recordHistory();
+        }
+        break;
+      }
+    }
+  };
+
+  const handleSaveVectorText = (textSettings: Omit<VectorText, 'id' | 'x' | 'y'>, existingId?: string) => {
+    const targetId = existingId || editingText?.id;
+    if (targetId) {
+      for (const l of layers) {
+        const txt = l.vectorTexts?.find((t) => t.id === targetId);
+        if (txt) {
+          Object.assign(txt, textSettings);
+          reRenderVectorLayer(l);
+          updateLayerThumbnail(l.id);
+          setLayers([...layers]);
+          setEditingText(null);
+          setTextPlacement(null);
+          recordHistory();
+          return;
+        }
+      }
+    }
+
+    const vLayer = ensureVectorLayer();
+    const pos = textPlacement || { x: canvasWidth / 2, y: canvasHeight / 2 };
+    const newText: VectorText = {
+      ...textSettings,
+      id: `vtext_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+    };
+    vLayer.vectorTexts = [...(vLayer.vectorTexts || []), newText];
+    reRenderVectorLayer(vLayer);
+    updateLayerThumbnail(vLayer.id);
+    setLayers([...layers]);
+    setTextPlacement(null);
+    setEditingText(null);
+    setSelectedTextId(newText.id);
+    setActiveTool('text');
+    setTimeout(() => recordHistory(), 50);
+  };
+
+  const handleDeleteVectorText = (textId?: string) => {
+    const idToDelete = textId || selectedTextId || editingText?.id;
+    if (!idToDelete) return;
+    for (const l of layers) {
+      if (l.vectorTexts?.some((t) => t.id === idToDelete)) {
+        l.vectorTexts = l.vectorTexts.filter((t) => t.id !== idToDelete);
+        reRenderVectorLayer(l);
+        updateLayerThumbnail(l.id);
+        setLayers([...layers]);
+        if (selectedTextId === idToDelete) setSelectedTextId(null);
+        if (editingText?.id === idToDelete) setEditingText(null);
+        recordHistory();
+        break;
+      }
+    }
+  };
+
+  const handleUpdateVectorText = (textId: string, updates: Partial<VectorText>) => {
+    for (const l of layers) {
+      if (l.vectorTexts?.some((t) => t.id === textId)) {
+        l.vectorTexts = l.vectorTexts.map((t) => (t.id === textId ? { ...t, ...updates } : t));
+        reRenderVectorLayer(l);
+        updateLayerThumbnail(l.id);
+        setLayers([...layers]);
+        recordHistory();
+        break;
+      }
+    }
+  };
+
+  const handleUpdateSelectedText = (updates: Partial<VectorText>) => {
+    if (selectedTextId) {
+      handleUpdateVectorText(selectedTextId, updates);
+    }
+  };
+
+  const selectedPathObj = (() => {
+    if (!selectedVectorPathId) return null;
+    for (const l of layers) {
+      const found = l.vectorPaths?.find((p) => p.id === selectedVectorPathId);
+      if (found) return found;
+    }
+    return null;
+  })();
+
+  const selectedTextObj = (() => {
+    if (!selectedTextId) return null;
+    for (const l of layers) {
+      const found = l.vectorTexts?.find((t) => t.id === selectedTextId);
+      if (found) return found;
+    }
+    return null;
+  })();
+
+  const handleInsertVectorText = (textSettings: Omit<VectorText, 'id' | 'x' | 'y'>) => {
+    handleSaveVectorText(textSettings);
+  };
+
   const handleCleanUpVectorLayer = (layerId: string) => {
     const layer = layers.find((l) => l.id === layerId);
     if (!layer || layer.type !== 'vector' || !layer.vectorStrokes?.length) return;
@@ -434,7 +717,7 @@ export default function App() {
 
   const handleScaleVectorLayer = (layerId: string, factor: number) => {
     const layer = layers.find((l) => l.id === layerId);
-    if (!layer || layer.type !== 'vector' || !layer.vectorStrokes?.length) return;
+    if (!layer || layer.type !== 'vector' || (!layer.vectorStrokes?.length && !layer.vectorTexts?.length && !layer.vectorPaths?.length)) return;
 
     scaleVectorLayer(layer, factor);
     updateLayerThumbnail(layer.id);
@@ -701,14 +984,193 @@ export default function App() {
       layers: docLayers.map((l) => ({
         id: l.id,
         name: l.name,
+        type: l.type,
         visible: l.visible,
         locked: l.locked,
         opacity: l.opacity,
         blendMode: l.blendMode,
+        vectorStrokes: l.vectorStrokes,
+        vectorTexts: l.vectorTexts,
+        vectorPaths: l.vectorPaths,
         dataUrl: l.canvas.toDataURL(),
       })),
     };
     return JSON.stringify(projectData, null, 2);
+  };
+
+  const handleSaveToTsg = async (): Promise<string | null> => {
+    if (!isTsgStudio || studioPermission === 'viewer' || studioBusy) return null;
+    setStudioBusy(true);
+    setStudioNotice('Saving drawing…');
+    try {
+      const payload = {
+        name: canvasName.replace(/\.[^/.]+$/, '').slice(0, 150) || 'Untitled drawing',
+        document: JSON.parse(serializeDocToJson(canvasName, canvasWidth, canvasHeight, canvasBgColor, layers)),
+        version: studioVersion,
+      };
+      const endpoint = studioProjectId
+        ? `${studioApiBase}/projects/${studioProjectId}`
+        : `${studioApiBase}/projects`;
+      const response = await fetch(endpoint, {
+        method: studioProjectId ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': studioRoot?.dataset.csrfToken || '',
+        },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'The drawing could not be saved.');
+      setStudioProjectId(String(result.id));
+      setStudioVersion(Number(result.version));
+      setIsModified(false);
+      setStudioNotice('Saved to your TSG account.');
+      if (!studioProjectId) window.history.replaceState({}, '', `/art-draw-studio/editor/${result.id}`);
+      return String(result.id);
+    } catch (error) {
+      setStudioNotice(error instanceof Error ? error.message : 'The drawing could not be saved.');
+      return null;
+    } finally {
+      setStudioBusy(false);
+    }
+  };
+
+  const handleShareFromTsg = async () => {
+    if (studioPermission !== 'owner') return;
+    let projectId = studioProjectId;
+    if (!projectId) {
+      projectId = await handleSaveToTsg() || '';
+    }
+    if (!projectId) return;
+    setStudioBusy(true);
+    try {
+      const response = await fetch(`${studioApiBase}/projects/${projectId}/shares`, { credentials: 'same-origin' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Sharing details could not be loaded.');
+      setStudioShares(result.shares || []);
+      setStudioShareOpen(true);
+      setStudioNotice('');
+    } catch (error) {
+      setStudioNotice(error instanceof Error ? error.message : 'Sharing details could not be loaded.');
+    } finally {
+      setStudioBusy(false);
+    }
+  };
+
+  const handleSubmitStudioShare = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!studioProjectId || !studioRecipient.trim() || studioBusy) return;
+    setStudioBusy(true);
+    setStudioNotice('Sharing drawing…');
+    try {
+      const response = await fetch(`${studioApiBase}/projects/${studioProjectId}/shares`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': studioRoot?.dataset.csrfToken || '' },
+        body: JSON.stringify({ recipient: studioRecipient.trim(), permission: studioSharePermission }),
+        credentials: 'same-origin',
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Sharing could not be saved.');
+      setStudioShares((previous) => [...previous.filter((share) => share.id !== result.share.id), result.share]);
+      setStudioRecipient('');
+      setStudioNotice(`Shared with ${result.share.username || result.share.email}.`);
+    } catch (error) {
+      setStudioNotice(error instanceof Error ? error.message : 'Sharing could not be saved.');
+    } finally {
+      setStudioBusy(false);
+    }
+  };
+
+  const handleRemoveStudioShare = async (shareId: number) => {
+    if (!studioProjectId || studioBusy || !window.confirm('Remove this person’s access to the drawing?')) return;
+    setStudioBusy(true);
+    try {
+      const response = await fetch(`${studioApiBase}/projects/${studioProjectId}/shares/${shareId}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': studioRoot?.dataset.csrfToken || '' },
+        credentials: 'same-origin',
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Access could not be removed.');
+      setStudioShares((previous) => previous.filter((share) => share.id !== shareId));
+      setStudioNotice('Access removed.');
+    } catch (error) {
+      setStudioNotice(error instanceof Error ? error.message : 'Access could not be removed.');
+    } finally {
+      setStudioBusy(false);
+    }
+  };
+
+  const handleExportArtwork = () => {
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = canvasWidth;
+    exportCanvas.height = canvasHeight;
+    const ctx = exportCanvas.getContext('2d');
+    if (!ctx) return;
+    layers.forEach((layer) => {
+      if (layer.visible && layer.canvas && layer.name.toLowerCase() !== 'paper background') {
+        ctx.globalAlpha = layer.opacity;
+        ctx.globalCompositeOperation = layer.blendMode;
+        ctx.drawImage(layer.canvas, 0, 0);
+      }
+    });
+    const link = document.createElement('a');
+    link.download = `${canvasName.replace(/\.[^/.]+$/, '')}-artwork.png`;
+    link.href = exportCanvas.toDataURL('image/png');
+    link.click();
+  };
+
+  const handleSendArtworkToDesigns = async () => {
+    if (studioPermission === 'viewer' || studioBusy) return;
+    let projectId = studioProjectId;
+    if (!projectId) projectId = await handleSaveToTsg() || '';
+    if (!projectId) return;
+    const designName = window.prompt('Name this saved artwork:', canvasName.replace(/\.[^/.]+$/, ''));
+    if (!designName?.trim()) return;
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = canvasWidth;
+    exportCanvas.height = canvasHeight;
+    const ctx = exportCanvas.getContext('2d');
+    if (!ctx) return;
+    layers.forEach((layer) => {
+      if (layer.visible && layer.canvas && layer.name.toLowerCase() !== 'paper background') {
+        ctx.globalAlpha = layer.opacity;
+        ctx.globalCompositeOperation = layer.blendMode;
+        ctx.drawImage(layer.canvas, 0, 0);
+      }
+    });
+    const image = await new Promise<Blob | null>((resolve) => exportCanvas.toBlob(resolve, 'image/png'));
+    if (!image) {
+      setStudioNotice('The artwork PNG could not be created.');
+      return;
+    }
+    if (image.size > 20 * 1024 * 1024) {
+      setStudioNotice('This artwork is larger than the 20 MB design upload limit.');
+      return;
+    }
+    setStudioBusy(true);
+    setStudioNotice('Saving artwork to Art Draw Studio…');
+    try {
+      const form = new FormData();
+      form.append('project_id', projectId);
+      form.append('name', designName.trim());
+      form.append('canvas_file', image, `${designName.trim().replace(/[^a-z0-9_-]+/gi, '_')}.png`);
+      const response = await fetch(`${studioApiBase}/drawings`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': studioRoot?.dataset.csrfToken || '' },
+        body: form,
+        credentials: 'same-origin',
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'The artwork could not be saved to Art Draw Studio.');
+      setStudioDesignUrl(result.url || '/art-draw-studio/drawings');
+      setStudioNotice(`Artwork saved to Art Draw Studio as “${result.name}”.`);
+    } catch (error) {
+      setStudioNotice(error instanceof Error ? error.message : 'The artwork could not be saved to Art Draw Studio.');
+    } finally {
+      setStudioBusy(false);
+    }
   };
 
   const handleSaveProject = async (forceSaveAs = false) => {
@@ -873,7 +1335,7 @@ export default function App() {
     setClosePromptTarget(null);
   };
 
-  const handleLoadProject = (file: File, handle?: FileSystemFileHandle) => {
+  const handleLoadProject = (file: File, handle?: FileSystemFileHandle, studioLoad = false) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -895,7 +1357,9 @@ export default function App() {
             layerObj.locked = l.locked !== undefined ? l.locked : false;
             layerObj.opacity = l.opacity !== undefined ? l.opacity : 1.0;
             layerObj.blendMode = l.blendMode || 'source-over';
-            layerObj.vectorStrokes = l.vectorStrokes;
+            layerObj.vectorStrokes = l.vectorStrokes || (l.type === 'vector' ? [] : undefined);
+            layerObj.vectorTexts = l.vectorTexts || (l.type === 'vector' ? [] : undefined);
+            layerObj.vectorPaths = l.vectorPaths || (l.type === 'vector' ? [] : undefined);
 
             if (l.dataUrl) {
               const img = new Image();
@@ -908,7 +1372,7 @@ export default function App() {
               img.src = l.dataUrl;
             }
 
-            if (l.type === 'vector' && l.vectorStrokes) {
+            if (l.type === 'vector' && (l.vectorStrokes || l.vectorTexts || l.vectorPaths)) {
               reRenderVectorLayer(layerObj);
             }
             return layerObj;
@@ -954,17 +1418,39 @@ export default function App() {
           setCanUndo(false);
           setCanRedo(false);
           handleFitScreen();
+          if (studioLoad) setStudioBusy(false);
 
-          setTimeout(() => {
-            recordHistory();
-          }, 150);
         }
       } catch (err) {
         console.error('Failed to load project file', err);
+        if (studioLoad) {
+          setStudioNotice('This drawing file could not be read.');
+          setStudioBusy(false);
+        }
       }
     };
     reader.readAsText(file);
   };
+
+  useEffect(() => {
+    if (!isTsgStudio || !studioProjectId) return;
+    let cancelled = false;
+    fetch(`${studioApiBase}/projects/${studioProjectId}`, { credentials: 'same-origin' })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'This drawing could not be loaded.');
+        if (cancelled) return;
+        setStudioVersion(Number(result.version));
+        handleLoadProject(new File([result.document], `${result.name || 'Drawing'}.json`, { type: 'application/json' }), undefined, true);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStudioNotice(error instanceof Error ? error.message : 'This drawing could not be loaded.');
+          setStudioBusy(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleImportImage = (file: File) => {
     const reader = new FileReader();
@@ -1159,7 +1645,51 @@ export default function App() {
         return;
       }
 
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.key === 'Shift') {
+        setIsOrtho(true);
+      }
+
+      if (e.key === 'Enter' && activeTool === 'vector' && inProgressNodes.length >= 2) {
+        e.preventDefault();
+        handleFinishInProgressPath();
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (inProgressNodes.length > 0) {
+          handleCancelInProgressPath();
+          return;
+        }
+        if (selectedVectorPathId) {
+          setSelectedVectorPathId(null);
+          setSelectedNodeIndex(null);
+          return;
+        }
+        if (selectedTextId) {
+          setSelectedTextId(null);
+          return;
+        }
+      }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedTextId) {
+          e.preventDefault();
+          handleDeleteVectorText(selectedTextId);
+          return;
+        }
+        if (selectedVectorPathId) {
+          e.preventDefault();
+          if (selectedNodeIndex !== null) {
+            handleDeleteSelectedNode();
+          } else {
+            handleDeleteVectorPath(selectedVectorPathId);
+          }
+          return;
+        }
         handleClearActiveLayer();
         return;
       }
@@ -1170,14 +1700,17 @@ export default function App() {
           if (activeTool === 'brush') {
             setIsDesktopBrushMenuOpen((prev) => !prev);
           } else {
-            setActiveTool('brush');
+            handleSelectTool('brush');
           }
           break;
         case 'p':
-          setActiveTool('brush');
+          handleSelectTool('brush');
           break;
-        case 'n':
-          setActiveTool('pencil');
+        case 'v':
+          handleSelectTool('vector');
+          break;
+        case 't':
+          handleSelectTool('text');
           break;
         case 'e':
           setActiveTool('eraser');
@@ -1219,6 +1752,9 @@ export default function App() {
       if (e.code === 'Space') {
         setIsSpacePressed(false);
       }
+      if (e.key === 'Shift') {
+        setIsOrtho(false);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -1227,7 +1763,29 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [layers, activeLayerId, activeDocId, documents, canvasName, canvasWidth, canvasHeight, canvasBgColor, isModified, transform]);
+  }, [
+    layers,
+    activeLayerId,
+    activeDocId,
+    documents,
+    canvasName,
+    canvasWidth,
+    canvasHeight,
+    canvasBgColor,
+    isModified,
+    transform,
+    activeTool,
+    handleSelectTool,
+    inProgressNodes,
+    selectedVectorPathId,
+    selectedNodeIndex,
+    selectedTextId,
+    vectorIsClosed,
+    vectorStrokeColor,
+    vectorStrokeWidth,
+    vectorStrokeDash,
+    vectorFillColor,
+  ]);
 
   // Dynamic Tabs List
   const tabs = documents.map((doc) => {
@@ -1252,6 +1810,53 @@ export default function App() {
       id="art-draw-studio-app"
       className="h-screen w-screen flex flex-col bg-[#121212] text-[#d1d1d1] font-sans overflow-hidden select-none"
     >
+      {isTsgStudio && (
+        <div className="fixed top-2 right-2 z-[100] max-w-[calc(100vw-1rem)] flex flex-wrap items-center justify-end gap-2 rounded-lg border border-white/10 bg-[#202020]/95 p-2 shadow-xl backdrop-blur">
+          <a href="/art-draw-studio" className="rounded border border-white/20 px-2 py-1 text-xs text-white no-underline hover:bg-white/10">My drawings</a>
+          {studioPermission !== 'viewer' && (
+            <button type="button" onClick={handleSaveToTsg} disabled={studioBusy} className="rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">
+              {studioBusy ? 'Saving…' : studioProjectId ? 'Save to TSG' : 'Save drawing'}
+            </button>
+          )}
+          {studioPermission === 'owner' && (
+            <button type="button" onClick={handleShareFromTsg} disabled={studioBusy} className="rounded border border-white/30 px-2 py-1 text-xs text-white disabled:opacity-50">Share</button>
+          )}
+          <button type="button" onClick={handleExportArtwork} className="rounded border border-emerald-400/50 px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-400/10">Export artwork PNG</button>
+          {studioPermission !== 'viewer' && (
+            <button type="button" onClick={handleSendArtworkToDesigns} disabled={studioBusy} className="rounded border border-purple-400/50 px-2 py-1 text-xs text-purple-200 disabled:opacity-50">Save artwork</button>
+          )}
+          {studioPermission === 'viewer' && <span className="text-xs text-amber-200">View only</span>}
+          {studioNotice && <span role="status" aria-live="polite" className="w-full text-right text-xs text-white/80">{studioNotice}</span>}
+          {studioDesignUrl && <a href={studioDesignUrl} className="w-full text-right text-xs text-emerald-200 underline">View saved artwork</a>}
+          {studioShareOpen && (
+            <section className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-1rem)] rounded-lg border border-white/15 bg-[#202020] p-3 text-white shadow-2xl">
+              <div className="mb-2 flex items-center justify-between">
+                <strong className="text-sm">Share drawing</strong>
+                <button type="button" onClick={() => setStudioShareOpen(false)} className="px-2 text-white/70 hover:text-white" aria-label="Close sharing panel">×</button>
+              </div>
+              <form onSubmit={handleSubmitStudioShare} className="flex flex-col gap-2">
+                <input value={studioRecipient} onChange={(event) => setStudioRecipient(event.target.value)} placeholder="Account email or username" className="rounded border border-white/20 bg-[#121212] px-2 py-1.5 text-xs text-white" />
+                <div className="flex gap-2">
+                  <select value={studioSharePermission} onChange={(event) => setStudioSharePermission(event.target.value as 'viewer' | 'editor')} className="min-w-0 flex-1 rounded border border-white/20 bg-[#121212] px-2 py-1.5 text-xs text-white">
+                    <option value="viewer">Can view</option>
+                    <option value="editor">Can edit</option>
+                  </select>
+                  <button type="submit" disabled={studioBusy || !studioRecipient.trim()} className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Share</button>
+                </div>
+              </form>
+              <div className="mt-3 border-t border-white/10 pt-2">
+                <div className="mb-1 text-xs font-semibold text-white/70">People with access</div>
+                {studioShares.length === 0 ? <p className="text-xs text-white/50">No one else has access yet.</p> : studioShares.map((share) => (
+                  <div key={share.id} className="flex items-center justify-between gap-2 py-1 text-xs">
+                    <span className="min-w-0 truncate">{share.username || share.email} · {share.permission}</span>
+                    <button type="button" onClick={() => handleRemoveStudioShare(share.id)} disabled={studioBusy} className="shrink-0 text-red-300 hover:text-red-200">Remove</button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
       {effectiveIsMobile ? (
         /* MOBILE TOUCH-OPTIMIZED LAYOUT */
         <div className="flex flex-col h-full w-full overflow-hidden relative">
@@ -1275,40 +1880,109 @@ export default function App() {
           />
 
           {/* 2. Full-Screen Canvas Workspace with Floating HUD */}
-          <div className="flex-1 relative overflow-hidden bg-[#1a1a1a]">
-            {/* Mobile Quick Brush Size & Opacity HUD (Left Edge) */}
-            <MobileCanvasHUD
-              brush={brush}
-              onUpdateBrush={(updates) => setBrush((prev) => ({ ...prev, ...updates }))}
-              primaryColor={primaryColor}
-            />
+          <div className="flex-1 flex flex-col relative overflow-hidden bg-[#1a1a1a]">
+            {activeTool === 'vector' && (
+              <VectorCadBar
+                mode={vectorCadMode}
+                onSetMode={setVectorCadMode}
+                strokeColor={vectorStrokeColor}
+                onChangeStrokeColor={setVectorStrokeColor}
+                strokeWidth={vectorStrokeWidth}
+                onChangeStrokeWidth={setVectorStrokeWidth}
+                strokeDash={vectorStrokeDash}
+                onChangeStrokeDash={setVectorStrokeDash}
+                fillColor={vectorFillColor}
+                onChangeFillColor={setVectorFillColor}
+                isClosed={vectorIsClosed}
+                onToggleClosed={() => setVectorIsClosed((prev) => !prev)}
+                inProgressNodeCount={inProgressNodes.length}
+                onFinishPath={handleFinishInProgressPath}
+                onCancelPath={handleCancelInProgressPath}
+                selectedPath={selectedPathObj}
+                selectedNodeIndex={selectedNodeIndex}
+                onDeleteSelectedPath={() => selectedVectorPathId && handleDeleteVectorPath(selectedVectorPathId)}
+                onDeleteSelectedNode={handleDeleteSelectedNode}
+                onToggleNodeType={handleToggleNodeType}
+                isGridSnap={isGridSnap}
+                onToggleGridSnap={() => setIsGridSnap((prev) => !prev)}
+                isOrtho={isOrtho}
+                onToggleOrtho={() => setIsOrtho((prev) => !prev)}
+              />
+            )}
 
-            {/* Interactive Multi-layer Canvas Area */}
-            <CanvasArea
-              layers={layers}
-              activeLayerId={activeLayerId}
-              activeTool={activeTool}
-              brush={brush}
-              primaryColor={primaryColor}
-              secondaryColor={secondaryColor}
-              isTransparentMode={isTransparentMode}
-              canvasWidth={canvasWidth}
-              canvasHeight={canvasHeight}
-              canvasBgColor={canvasBgColor}
-              transform={transform}
-              selection={selection}
-              onTransformChange={setTransform}
-              onSelectionChange={setSelection}
-              onColorSampled={(sampled) => setPrimaryColor(sampled)}
-              onStrokeEnd={recordHistory}
-              onCursorMove={(pos, pressure) => {
-                setCursorPos(pos);
-                setCurrentPressure(pressure);
-              }}
-              onStylusUpdate={setStylusState}
-              isSpacePressed={isSpacePressed}
-              touchSettings={touchSettings}
-            />
+            {(activeTool === 'text' || selectedTextId !== null) && (
+              <TextQuickBar
+                selectedText={selectedTextObj}
+                onUpdateSelectedText={handleUpdateSelectedText}
+                onDeleteSelectedText={() => handleDeleteVectorText()}
+                onOpenGoogleFontLibrary={() => setIsGoogleFontLibraryOpen(true)}
+                onOpenTextDialogForNew={() => setTextPlacement({ x: canvasWidth / 2, y: canvasHeight / 2 })}
+                defaultFontFamily={defaultFontFamily}
+                onSetDefaultFontFamily={setDefaultFontFamily}
+                primaryColor={primaryColor}
+              />
+            )}
+
+            <div className="flex-1 relative overflow-hidden">
+              {/* Mobile Quick Brush Size & Opacity HUD (Left Edge) */}
+              <MobileCanvasHUD
+                brush={brush}
+                onUpdateBrush={(updates) => setBrush((prev) => ({ ...prev, ...updates }))}
+                primaryColor={primaryColor}
+              />
+
+              {/* Interactive Multi-layer Canvas Area */}
+              <CanvasArea
+                layers={layers}
+                activeLayerId={activeLayerId}
+                activeTool={activeTool}
+                brush={brush}
+                primaryColor={primaryColor}
+                secondaryColor={secondaryColor}
+                isTransparentMode={isTransparentMode}
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+                canvasBgColor={canvasBgColor}
+                transform={transform}
+                selection={selection}
+                onTransformChange={setTransform}
+                onSelectionChange={setSelection}
+                onColorSampled={(sampled) => setPrimaryColor(sampled)}
+                onTextPlace={setTextPlacement}
+                onStrokeEnd={recordHistory}
+                onCursorMove={(pos, pressure) => {
+                  setCursorPos(pos);
+                  setCurrentPressure(pressure);
+                }}
+                onStylusUpdate={setStylusState}
+                isSpacePressed={isSpacePressed}
+                touchSettings={touchSettings}
+                // Vector CAD Props
+                vectorCadMode={vectorCadMode}
+                vectorStrokeColor={vectorStrokeColor}
+                vectorStrokeWidth={vectorStrokeWidth}
+                vectorStrokeDash={vectorStrokeDash}
+                vectorFillColor={vectorFillColor}
+                vectorIsClosed={vectorIsClosed}
+                isGridSnap={isGridSnap}
+                isOrtho={isOrtho}
+                inProgressNodes={inProgressNodes}
+                onInProgressNodesChange={setInProgressNodes}
+                onCommitVectorPath={handleCommitVectorPath}
+                onUpdateVectorPath={handleUpdateVectorPath}
+                onDeleteVectorPath={handleDeleteVectorPath}
+                selectedVectorPathId={selectedVectorPathId}
+                onSelectVectorPath={setSelectedVectorPathId}
+                selectedNodeIndex={selectedNodeIndex}
+                onSelectNodeIndex={setSelectedNodeIndex}
+                // Typography Props
+                selectedTextId={selectedTextId}
+                onSelectVectorText={setSelectedTextId}
+                onEditVectorText={(text) => setEditingText(text)}
+                onDeleteVectorText={handleDeleteVectorText}
+                onUpdateVectorText={(textId, updates) => handleUpdateVectorText(textId, updates)}
+              />
+            </div>
           </div>
 
           {/* 3. Mobile Thumb-Friendly Bottom Dock */}
@@ -1334,7 +2008,7 @@ export default function App() {
             isOpen={activeMobileSheet === 'tools'}
             onClose={() => setActiveMobileSheet(null)}
             activeTool={activeTool}
-            onSelectTool={setActiveTool}
+            onSelectTool={handleSelectTool}
           />
 
           <MobileColorSheet
@@ -1464,7 +2138,7 @@ export default function App() {
             {/* 2. Left Tool Sidebar */}
             <Toolbar
               activeTool={activeTool}
-              onSelectTool={setActiveTool}
+              onSelectTool={handleSelectTool}
               primaryColor={primaryColor}
               secondaryColor={secondaryColor}
               isTransparentMode={isTransparentMode}
@@ -1495,6 +2169,48 @@ export default function App() {
                 isBrushMenuOpen={isDesktopBrushMenuOpen}
               />
 
+              {activeTool === 'vector' && (
+                <VectorCadBar
+                  mode={vectorCadMode}
+                  onSetMode={setVectorCadMode}
+                  strokeColor={vectorStrokeColor}
+                  onChangeStrokeColor={setVectorStrokeColor}
+                  strokeWidth={vectorStrokeWidth}
+                  onChangeStrokeWidth={setVectorStrokeWidth}
+                  strokeDash={vectorStrokeDash}
+                  onChangeStrokeDash={setVectorStrokeDash}
+                  fillColor={vectorFillColor}
+                  onChangeFillColor={setVectorFillColor}
+                  isClosed={vectorIsClosed}
+                  onToggleClosed={() => setVectorIsClosed((prev) => !prev)}
+                  inProgressNodeCount={inProgressNodes.length}
+                  onFinishPath={handleFinishInProgressPath}
+                  onCancelPath={handleCancelInProgressPath}
+                  selectedPath={selectedPathObj}
+                  selectedNodeIndex={selectedNodeIndex}
+                  onDeleteSelectedPath={() => selectedVectorPathId && handleDeleteVectorPath(selectedVectorPathId)}
+                  onDeleteSelectedNode={handleDeleteSelectedNode}
+                  onToggleNodeType={handleToggleNodeType}
+                  isGridSnap={isGridSnap}
+                  onToggleGridSnap={() => setIsGridSnap((prev) => !prev)}
+                  isOrtho={isOrtho}
+                  onToggleOrtho={() => setIsOrtho((prev) => !prev)}
+                />
+              )}
+
+              {(activeTool === 'text' || selectedTextId !== null) && (
+                <TextQuickBar
+                  selectedText={selectedTextObj}
+                  onUpdateSelectedText={handleUpdateSelectedText}
+                  onDeleteSelectedText={() => handleDeleteVectorText()}
+                  onOpenGoogleFontLibrary={() => setIsGoogleFontLibraryOpen(true)}
+                  onOpenTextDialogForNew={() => setTextPlacement({ x: canvasWidth / 2, y: canvasHeight / 2 })}
+                  defaultFontFamily={defaultFontFamily}
+                  onSetDefaultFontFamily={setDefaultFontFamily}
+                  primaryColor={primaryColor}
+                />
+              )}
+
               {/* Interactive Multi-layer Canvas Area */}
               <CanvasArea
                 layers={layers}
@@ -1512,6 +2228,7 @@ export default function App() {
                 onTransformChange={setTransform}
                 onSelectionChange={setSelection}
                 onColorSampled={(sampled) => setPrimaryColor(sampled)}
+                onTextPlace={setTextPlacement}
                 onStrokeEnd={recordHistory}
                 onCursorMove={(pos, pressure) => {
                   setCursorPos(pos);
@@ -1520,6 +2237,30 @@ export default function App() {
                 onStylusUpdate={setStylusState}
                 isSpacePressed={isSpacePressed}
                 touchSettings={touchSettings}
+                // Vector CAD Props
+                vectorCadMode={vectorCadMode}
+                vectorStrokeColor={vectorStrokeColor}
+                vectorStrokeWidth={vectorStrokeWidth}
+                vectorStrokeDash={vectorStrokeDash}
+                vectorFillColor={vectorFillColor}
+                vectorIsClosed={vectorIsClosed}
+                isGridSnap={isGridSnap}
+                isOrtho={isOrtho}
+                inProgressNodes={inProgressNodes}
+                onInProgressNodesChange={setInProgressNodes}
+                onCommitVectorPath={handleCommitVectorPath}
+                onUpdateVectorPath={handleUpdateVectorPath}
+                onDeleteVectorPath={handleDeleteVectorPath}
+                selectedVectorPathId={selectedVectorPathId}
+                onSelectVectorPath={setSelectedVectorPathId}
+                selectedNodeIndex={selectedNodeIndex}
+                onSelectNodeIndex={setSelectedNodeIndex}
+                // Typography Props
+                selectedTextId={selectedTextId}
+                onSelectVectorText={setSelectedTextId}
+                onEditVectorText={(text) => setEditingText(text)}
+                onDeleteVectorText={handleDeleteVectorText}
+                onUpdateVectorText={(textId, updates) => handleUpdateVectorText(textId, updates)}
               />
             </div>
 
@@ -1594,6 +2335,7 @@ export default function App() {
             }}
             primaryColor={primaryColor}
             onUpdateBrushSize={(newSize) => setBrush((prev) => ({ ...prev, size: newSize }))}
+            onOpenStylusSettings={() => setIsTouchCalibModalOpen(true)}
           />
         </>
       )}
@@ -1620,6 +2362,33 @@ export default function App() {
         onSaveAndClose={handleSaveAndClose}
         onDiscardAndClose={handleDiscardAndClose}
         onCancel={handleCancelClosePrompt}
+      />
+
+      {/* 9. Text Tool Dialog for Add / Edit */}
+      {(textPlacement || editingText) && (
+        <TextToolDialog
+          initialText={editingText}
+          onSave={handleSaveVectorText}
+          onDelete={handleDeleteVectorText}
+          onClose={() => {
+            setTextPlacement(null);
+            setEditingText(null);
+          }}
+          onOpenGoogleFontLibrary={() => setIsGoogleFontLibraryOpen(true)}
+        />
+      )}
+
+      {/* 10. Google Font Library Modal */}
+      <GoogleFontLibraryModal
+        isOpen={isGoogleFontLibraryOpen}
+        onClose={() => setIsGoogleFontLibraryOpen(false)}
+        onSelectFont={(font) => {
+          setDefaultFontFamily(font);
+          if (selectedTextId) {
+            handleUpdateSelectedText({ fontFamily: font });
+          }
+        }}
+        activeFont={selectedTextObj?.fontFamily || defaultFontFamily}
       />
     </div>
   );

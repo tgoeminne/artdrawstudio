@@ -1,4 +1,4 @@
-import { Layer, Point, VectorStroke, BrushSettings } from '../types';
+import { Layer, Point, VectorStroke, VectorText, VectorPath, VectorNode, BrushSettings } from '../types';
 import { drawSegment, parseColor } from './brushEngine';
 
 /**
@@ -51,7 +51,210 @@ export function renderVectorStroke(
 }
 
 /**
- * Re-render all vector strokes of a layer onto its canvas context.
+ * Render a 2D CAD Vector Path (polygons, polylines, Bezier curves) onto canvas context.
+ */
+export function renderVectorPath(
+  ctx: CanvasRenderingContext2D,
+  path: VectorPath,
+  scaleX: number = 1,
+  scaleY: number = 1,
+  widthMultiplier: number = 1
+): void {
+  if (!path.nodes || path.nodes.length === 0) return;
+
+  ctx.save();
+  ctx.globalAlpha = path.opacity ?? 1;
+
+  ctx.beginPath();
+  const first = path.nodes[0];
+  ctx.moveTo(first.x * scaleX, first.y * scaleY);
+
+  for (let i = 0; i < path.nodes.length - 1; i++) {
+    const curr = path.nodes[i];
+    const next = path.nodes[i + 1];
+
+    if (curr.handleOut || next.handleIn) {
+      const cp1 = curr.handleOut
+        ? { x: curr.handleOut.x * scaleX, y: curr.handleOut.y * scaleY }
+        : { x: curr.x * scaleX, y: curr.y * scaleY };
+      const cp2 = next.handleIn
+        ? { x: next.handleIn.x * scaleX, y: next.handleIn.y * scaleY }
+        : { x: next.x * scaleX, y: next.y * scaleY };
+      ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, next.x * scaleX, next.y * scaleY);
+    } else {
+      ctx.lineTo(next.x * scaleX, next.y * scaleY);
+    }
+  }
+
+  if (path.closed && path.nodes.length > 1) {
+    const last = path.nodes[path.nodes.length - 1];
+    if (last.handleOut || first.handleIn) {
+      const cp1 = last.handleOut
+        ? { x: last.handleOut.x * scaleX, y: last.handleOut.y * scaleY }
+        : { x: last.x * scaleX, y: last.y * scaleY };
+      const cp2 = first.handleIn
+        ? { x: first.handleIn.x * scaleX, y: first.handleIn.y * scaleY }
+        : { x: first.x * scaleX, y: first.y * scaleY };
+      ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, first.x * scaleX, first.y * scaleY);
+    } else {
+      ctx.lineTo(first.x * scaleX, first.y * scaleY);
+    }
+    ctx.closePath();
+  }
+
+  // Fill path if set
+  if (path.fillColor && path.fillColor !== 'none' && path.fillColor !== 'transparent') {
+    ctx.fillStyle = path.fillColor;
+    ctx.fill(path.fillRule || 'nonzero');
+  }
+
+  // Stroke path
+  const strokeW = Math.max(0.5, (path.strokeWidth || 1) * widthMultiplier * ((scaleX + scaleY) / 2));
+  if (path.strokeColor && path.strokeColor !== 'none' && path.strokeColor !== 'transparent' && strokeW > 0) {
+    ctx.strokeStyle = path.strokeColor;
+    ctx.lineWidth = strokeW;
+    ctx.lineCap = path.strokeCap || 'round';
+    ctx.lineJoin = path.strokeJoin || 'round';
+
+    if (path.strokeDash === 'dashed') {
+      ctx.setLineDash([strokeW * 3, strokeW * 2]);
+    } else if (path.strokeDash === 'dotted') {
+      ctx.setLineDash([strokeW, strokeW * 1.5]);
+    } else {
+      ctx.setLineDash([]);
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Render Vector Text with full typography styles (font weight, styles, letter spacing, decoration, stroke, shadow).
+ */
+export function renderVectorText(ctx: CanvasRenderingContext2D, item: VectorText): void {
+  ctx.save();
+
+  // Shadow
+  if (item.shadowColor && item.shadowBlur && item.shadowBlur > 0) {
+    ctx.shadowColor = item.shadowColor;
+    ctx.shadowBlur = item.shadowBlur;
+    ctx.shadowOffsetX = item.shadowOffsetX || 0;
+    ctx.shadowOffsetY = item.shadowOffsetY || 0;
+  }
+
+  const weight = item.fontWeight || (item.bold ? '700' : '400');
+  const style = item.italic ? 'italic ' : '';
+  ctx.font = `${style}${weight} ${Math.round(item.fontSize)}px "${item.fontFamily}", sans-serif`;
+  ctx.textAlign = item.align || 'left';
+  ctx.textBaseline = 'top';
+
+  // Letter spacing support if available in canvas context
+  if ('letterSpacing' in ctx && typeof item.letterSpacing === 'number') {
+    (ctx as any).letterSpacing = `${item.letterSpacing}px`;
+  }
+
+  let displayText = item.text || '';
+  if (item.uppercase) {
+    displayText = displayText.toUpperCase();
+  }
+
+  const lines = displayText.split('\n');
+  const lineHeight = item.lineHeight || Math.round(item.fontSize * 1.25);
+
+  lines.forEach((line, index) => {
+    const yPos = item.y + index * lineHeight;
+
+    // Stroke outline
+    if (item.strokeColor && item.strokeWidth && item.strokeWidth > 0) {
+      ctx.strokeStyle = item.strokeColor;
+      ctx.lineWidth = item.strokeWidth;
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.strokeText(line, item.x, yPos);
+    }
+
+    // Fill
+    ctx.fillStyle = item.color;
+    ctx.fillText(line, item.x, yPos);
+
+    // Text decorations: Underline & Strikethrough
+    if (item.underline || item.strikethrough) {
+      const metrics = ctx.measureText(line);
+      const textWidth = metrics.width;
+      let startX = item.x;
+      if (item.align === 'center') {
+        startX = item.x - textWidth / 2;
+      } else if (item.align === 'right') {
+        startX = item.x - textWidth;
+      }
+
+      ctx.lineWidth = Math.max(1, Math.round(item.fontSize / 16));
+      ctx.strokeStyle = item.color;
+
+      if (item.underline) {
+        const lineY = yPos + item.fontSize + 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, lineY);
+        ctx.lineTo(startX + textWidth, lineY);
+        ctx.stroke();
+      }
+
+      if (item.strikethrough) {
+        const lineY = yPos + item.fontSize * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(startX, lineY);
+        ctx.lineTo(startX + textWidth, lineY);
+        ctx.stroke();
+      }
+    }
+  });
+
+  ctx.restore();
+}
+
+/**
+ * Measure text bounding box on canvas.
+ */
+export function measureVectorTextBounds(
+  ctx: CanvasRenderingContext2D,
+  item: VectorText
+): { x: number; y: number; width: number; height: number } {
+  ctx.save();
+  const weight = item.fontWeight || (item.bold ? '700' : '400');
+  const style = item.italic ? 'italic ' : '';
+  ctx.font = `${style}${weight} ${Math.round(item.fontSize)}px "${item.fontFamily}", sans-serif`;
+
+  let displayText = item.text || '';
+  if (item.uppercase) displayText = displayText.toUpperCase();
+  const lines = displayText.split('\n');
+  const lineHeight = item.lineHeight || Math.round(item.fontSize * 1.25);
+
+  let maxWidth = 0;
+  for (const line of lines) {
+    const w = ctx.measureText(line).width;
+    if (w > maxWidth) maxWidth = w;
+  }
+  const totalHeight = Math.max(lineHeight, lines.length * lineHeight);
+
+  let x = item.x;
+  if (item.align === 'center') {
+    x = item.x - maxWidth / 2;
+  } else if (item.align === 'right') {
+    x = item.x - maxWidth;
+  }
+
+  ctx.restore();
+  return {
+    x,
+    y: item.y,
+    width: Math.max(16, maxWidth),
+    height: totalHeight,
+  };
+}
+
+/**
+ * Re-render all vector strokes, paths, and texts of a layer onto its canvas context.
  */
 export function reRenderVectorLayer(
   layer: Layer,
@@ -59,11 +262,23 @@ export function reRenderVectorLayer(
   scaleY: number = 1,
   widthMultiplier: number = 1
 ) {
-  if (!layer.vectorStrokes) return;
+  if (!layer.vectorStrokes && !layer.vectorTexts && !layer.vectorPaths) return;
   layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
 
-  for (const stroke of layer.vectorStrokes) {
+  for (const stroke of layer.vectorStrokes || []) {
     renderVectorStroke(layer.ctx, stroke, scaleX, scaleY, widthMultiplier);
+  }
+  for (const path of layer.vectorPaths || []) {
+    renderVectorPath(layer.ctx, path, scaleX, scaleY, widthMultiplier);
+  }
+  for (const item of layer.vectorTexts || []) {
+    renderVectorText(layer.ctx, {
+      ...item,
+      x: item.x * scaleX,
+      y: item.y * scaleY,
+      fontSize: item.fontSize * ((scaleX + scaleY) / 2),
+      lineHeight: item.lineHeight * ((scaleX + scaleY) / 2),
+    });
   }
 }
 
@@ -179,17 +394,23 @@ export function cleanUpVectorLayer(layer: Layer, tolerance: number = 1.2) {
 
 /**
  * Adjust the line width (stroke weight) of all strokes on a vector layer.
- * Factor: e.g. 1.2 = +20% thicker, 0.8 = -20% thinner.
  */
 export function adjustVectorLayerWidth(layer: Layer, factor: number) {
-  if (!layer.vectorStrokes || layer.vectorStrokes.length === 0) return;
-  layer.vectorStrokes = layer.vectorStrokes.map((s) => ({
-    ...s,
-    brush: {
-      ...s.brush,
-      size: Math.max(1, Math.min(200, Math.round(s.brush.size * factor))),
-    },
-  }));
+  if (layer.vectorStrokes) {
+    layer.vectorStrokes = layer.vectorStrokes.map((s) => ({
+      ...s,
+      brush: {
+        ...s.brush,
+        size: Math.max(1, Math.min(200, Math.round(s.brush.size * factor))),
+      },
+    }));
+  }
+  if (layer.vectorPaths) {
+    layer.vectorPaths = layer.vectorPaths.map((p) => ({
+      ...p,
+      strokeWidth: Math.max(0.5, Math.min(100, Math.round(p.strokeWidth * factor * 10) / 10)),
+    }));
+  }
   reRenderVectorLayer(layer);
 }
 
@@ -199,44 +420,101 @@ export const adjustVectorStrokeWidths = adjustVectorLayerWidth;
  * Scale the entire vector layer cleanly without resolution pixelation.
  */
 export function scaleVectorLayer(layer: Layer, scaleFactor: number) {
-  if (!layer.vectorStrokes || layer.vectorStrokes.length === 0) return;
+  const hasStrokes = !!layer.vectorStrokes?.length;
+  const hasTexts = !!layer.vectorTexts?.length;
+  const hasPaths = !!layer.vectorPaths?.length;
+  if (!hasStrokes && !hasTexts && !hasPaths) return;
+
   const cx = layer.canvas.width / 2;
   const cy = layer.canvas.height / 2;
 
-  layer.vectorStrokes = layer.vectorStrokes.map((s) => ({
-    ...s,
-    brush: {
-      ...s.brush,
-      size: Math.max(1, Math.round(s.brush.size * scaleFactor)),
-    },
-    points: s.points.map((p) => ({
-      ...p,
-      x: cx + (p.x - cx) * scaleFactor,
-      y: cy + (p.y - cy) * scaleFactor,
-    })),
-  }));
+  if (layer.vectorStrokes) {
+    layer.vectorStrokes = layer.vectorStrokes.map((s) => ({
+      ...s,
+      brush: {
+        ...s.brush,
+        size: Math.max(1, Math.round(s.brush.size * scaleFactor)),
+      },
+      points: s.points.map((p) => ({
+        ...p,
+        x: cx + (p.x - cx) * scaleFactor,
+        y: cy + (p.y - cy) * scaleFactor,
+      })),
+    }));
+  }
+
+  if (layer.vectorPaths) {
+    layer.vectorPaths = layer.vectorPaths.map((path) => ({
+      ...path,
+      strokeWidth: Math.max(0.5, path.strokeWidth * scaleFactor),
+      nodes: path.nodes.map((node) => ({
+        ...node,
+        x: cx + (node.x - cx) * scaleFactor,
+        y: cy + (node.y - cy) * scaleFactor,
+        handleIn: node.handleIn
+          ? { x: cx + (node.handleIn.x - cx) * scaleFactor, y: cy + (node.handleIn.y - cy) * scaleFactor }
+          : undefined,
+        handleOut: node.handleOut
+          ? { x: cx + (node.handleOut.x - cx) * scaleFactor, y: cy + (node.handleOut.y - cy) * scaleFactor }
+          : undefined,
+      })),
+    }));
+  }
+
+  if (layer.vectorTexts) {
+    layer.vectorTexts = layer.vectorTexts.map((item) => ({
+      ...item,
+      x: cx + (item.x - cx) * scaleFactor,
+      y: cy + (item.y - cy) * scaleFactor,
+      fontSize: item.fontSize * scaleFactor,
+      lineHeight: item.lineHeight * scaleFactor,
+    }));
+  }
+
   reRenderVectorLayer(layer);
 }
 
 /**
- * Erase vector strokes touching the given (x, y) coordinates within hitRadius.
- * Returns true if any strokes were erased.
+ * Erase vector strokes/paths touching the given (x, y) coordinates within hitRadius.
  */
 export function vectorEraseAt(layer: Layer, x: number, y: number, hitRadius: number): boolean {
-  if (!layer.vectorStrokes || layer.vectorStrokes.length === 0) return false;
+  let changed = false;
 
-  const initialCount = layer.vectorStrokes.length;
-  layer.vectorStrokes = layer.vectorStrokes.filter((stroke) => {
-    // Check if any point is within hitRadius
-    for (const p of stroke.points) {
-      if (Math.hypot(p.x - x, p.y - y) <= hitRadius + stroke.brush.size / 2) {
-        return false; // remove stroke
+  if (layer.vectorStrokes && layer.vectorStrokes.length > 0) {
+    const initialStrokes = layer.vectorStrokes.length;
+    layer.vectorStrokes = layer.vectorStrokes.filter((stroke) => {
+      for (const p of stroke.points) {
+        if (Math.hypot(p.x - x, p.y - y) <= hitRadius + stroke.brush.size / 2) {
+          return false;
+        }
       }
-    }
-    return true;
-  });
+      return true;
+    });
+    if (layer.vectorStrokes.length !== initialStrokes) changed = true;
+  }
 
-  if (layer.vectorStrokes.length !== initialCount) {
+  if (layer.vectorPaths && layer.vectorPaths.length > 0) {
+    const initialPaths = layer.vectorPaths.length;
+    layer.vectorPaths = layer.vectorPaths.filter((path) => {
+      for (const node of path.nodes) {
+        if (Math.hypot(node.x - x, node.y - y) <= hitRadius + path.strokeWidth / 2) {
+          return false;
+        }
+      }
+      return true;
+    });
+    if (layer.vectorPaths.length !== initialPaths) changed = true;
+  }
+
+  if (layer.vectorTexts && layer.vectorTexts.length > 0) {
+    const initialTexts = layer.vectorTexts.length;
+    layer.vectorTexts = layer.vectorTexts.filter((t) => {
+      return Math.hypot(t.x - x, t.y - y) > hitRadius + t.fontSize / 2;
+    });
+    if (layer.vectorTexts.length !== initialTexts) changed = true;
+  }
+
+  if (changed) {
     reRenderVectorLayer(layer);
     return true;
   }

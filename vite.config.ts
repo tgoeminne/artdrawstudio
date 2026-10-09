@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: '/art_draw_studio/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
@@ -17,6 +18,12 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    },
+    build: {
+      outDir: path.resolve(__dirname, '../../plugins/ArtDrawStudio/webroot'),
+      assetsDir: 'assets',
+      manifest: true,
+      emptyOutDir: true,
     },
   };
 });

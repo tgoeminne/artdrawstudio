@@ -8,6 +8,9 @@ import {
   SelectionRect,
   TouchCalibrationSettings,
   VectorStroke,
+  VectorText,
+  VectorPath,
+  VectorNode,
   WacomStylusState,
 } from '../types';
 import {
@@ -20,8 +23,14 @@ import {
   applyStrokeTapering,
   applyPressureCurve,
 } from '../utils/brushEngine';
-import { reRenderVectorLayer, vectorEraseAt } from '../utils/vectorEngine';
+import {
+  reRenderVectorLayer,
+  renderVectorPath,
+  measureVectorTextBounds,
+  vectorEraseAt,
+} from '../utils/vectorEngine';
 import { floodFill } from '../utils/floodFill';
+import { VectorCadMode } from './VectorCadBar';
 
 interface CanvasAreaProps {
   layers: Layer[];
@@ -29,7 +38,7 @@ interface CanvasAreaProps {
   activeTool: ToolType;
   brush: BrushSettings;
   primaryColor: string;
-  secondaryColor: string;
+  secondaryColor?: string;
   isTransparentMode: boolean;
   canvasWidth: number;
   canvasHeight: number;
@@ -39,11 +48,38 @@ interface CanvasAreaProps {
   onTransformChange: (t: CanvasTransform | ((prev: CanvasTransform) => CanvasTransform)) => void;
   onSelectionChange: (s: SelectionRect) => void;
   onColorSampled: (hex: string) => void;
+  onTextPlace: (position: { x: number; y: number }) => void;
   onStrokeEnd: () => void;
   onCursorMove: (pos: { x: number; y: number } | null, pressure: number) => void;
   onStylusUpdate?: (state: WacomStylusState) => void;
   isSpacePressed: boolean;
   touchSettings?: TouchCalibrationSettings;
+
+  // Vector CAD Props
+  vectorCadMode?: VectorCadMode;
+  vectorStrokeColor?: string;
+  vectorStrokeWidth?: number;
+  vectorStrokeDash?: 'solid' | 'dashed' | 'dotted';
+  vectorFillColor?: string;
+  vectorIsClosed?: boolean;
+  isGridSnap?: boolean;
+  isOrtho?: boolean;
+  inProgressNodes?: VectorNode[];
+  onInProgressNodesChange?: (nodes: VectorNode[]) => void;
+  onCommitVectorPath?: (path: VectorPath) => void;
+  onUpdateVectorPath?: (pathId: string, updates: Partial<VectorPath>) => void;
+  onDeleteVectorPath?: (pathId: string) => void;
+  selectedVectorPathId?: string | null;
+  onSelectVectorPath?: (pathId: string | null) => void;
+  selectedNodeIndex?: number | null;
+  onSelectNodeIndex?: (index: number | null) => void;
+
+  // Typography Props
+  selectedTextId?: string | null;
+  onSelectVectorText?: (textId: string | null) => void;
+  onEditVectorText?: (text: VectorText) => void;
+  onDeleteVectorText?: (textId: string) => void;
+  onUpdateVectorText?: (textId: string, updates: Partial<VectorText>) => void;
 }
 
 export const CanvasArea: React.FC<CanvasAreaProps> = ({
@@ -61,11 +97,34 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   onTransformChange,
   onSelectionChange,
   onColorSampled,
+  onTextPlace,
   onStrokeEnd,
   onCursorMove,
   onStylusUpdate,
   isSpacePressed,
   touchSettings,
+  vectorCadMode = 'draw',
+  vectorStrokeColor = '#ffffff',
+  vectorStrokeWidth = 2,
+  vectorStrokeDash = 'solid',
+  vectorFillColor = 'none',
+  vectorIsClosed = true,
+  isGridSnap = false,
+  isOrtho = false,
+  inProgressNodes = [],
+  onInProgressNodesChange,
+  onCommitVectorPath,
+  onUpdateVectorPath,
+  onDeleteVectorPath,
+  selectedVectorPathId = null,
+  onSelectVectorPath,
+  selectedNodeIndex = null,
+  onSelectNodeIndex,
+  selectedTextId = null,
+  onSelectVectorText,
+  onEditVectorText,
+  onDeleteVectorText,
+  onUpdateVectorText,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -82,7 +141,22 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   const lastPointRef = useRef<Point | null>(null);
   const dragStartPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Wacom Stylus Telemetry Extractor (Pressure, Tilt, Rotation / Barrel Twist, Inverted Eraser)
+  // Vector CAD interactive drag references
+  const isDraggingTangentRef = useRef<boolean>(false);
+  const activePlacedNodeIndexRef = useRef<number>(-1);
+  const draggedCadTargetRef = useRef<{
+    type: 'node' | 'handleIn' | 'handleOut';
+    index: number;
+    origX: number;
+    origY: number;
+  } | null>(null);
+
+  // Text interactive drag & click references
+  const isDraggingTextRef = useRef<boolean>(false);
+  const textDragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const lastTextClickTimeRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
+
+  // Wacom Stylus Telemetry Extractor
   const extractStylusTelemetry = useCallback(
     (e: React.PointerEvent) => {
       const isPen = e.pointerType === 'pen';
@@ -93,16 +167,18 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       const altitude = Math.max(0, 90 - Math.min(90, tiltDist));
       const azimuth = ((Math.atan2(tiltY, tiltX) * 180) / Math.PI + 360) % 360;
 
-      // Detect Wacom eraser tip:
-      // In Wacom drivers & Pointer Events spec:
-      // - button === 5 is pen eraser tip
-      // - bit 5 (32) in buttons bitmask indicates eraser tip contact
       const isWacomEraser =
         e.button === 5 ||
         (e.buttons & 32) === 32 ||
         (e.pointerType === 'pen' && (e.button === 5 || (e.buttons & 32) === 32));
 
-      const rawPressure = isPen ? (typeof e.pressure === 'number' ? e.pressure : 0.5) : (e.pointerType === 'mouse' ? 0.85 : (e.pressure || 0.85));
+      const rawPressure = isPen
+        ? typeof e.pressure === 'number'
+          ? e.pressure
+          : 0.5
+        : e.pointerType === 'mouse'
+        ? 0.85
+        : e.pressure || 0.85;
       const curve = touchSettings?.pressureCurve || brush.pressureCurve || 'linear';
       const mappedPressure = applyPressureCurve(
         rawPressure * (touchSettings?.pressureMultiplier ?? 1.0),
@@ -111,7 +187,11 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
       const state: WacomStylusState = {
         isPen,
-        deviceName: isPen ? 'Wacom Digitizer Stylus' : e.pointerType === 'touch' ? 'Touchscreen' : 'Mouse Pointer',
+        deviceName: isPen
+          ? 'Wacom Digitizer Stylus'
+          : e.pointerType === 'touch'
+          ? 'Touchscreen'
+          : 'Mouse Pointer',
         pressure: mappedPressure,
         rawPressure,
         tiltX,
@@ -152,119 +232,188 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   const currentStrokePointsRef = useRef<Point[]>([]);
   const strokeColorStateRef = useRef<StrokeColorState | null>(null);
 
-  // Sync stabilizer setting
   useEffect(() => {
     stabilizerRef.current.setStabilization(brush.stabilization);
   }, [brush.stabilization]);
 
-  // Convert client viewport coordinates to Canvas coordinates with touch calibration
+  // Convert Client Window Coords -> Local Canvas Layer Space (0 to canvasWidth, 0 to canvasHeight)
   const clientToCanvasCoords = useCallback(
-    (clientX: number, clientY: number, pointerType: string = 'mouse'): { x: number; y: number } | null => {
+    (clientX: number, clientY: number, pointerType: string = 'mouse') => {
       if (!containerRef.current) return null;
       const rect = containerRef.current.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2 + transform.x;
-      const centerY = rect.top + rect.height / 2 + transform.y;
+      const containerCenterX = rect.left + rect.width / 2;
+      const containerCenterY = rect.top + rect.height / 2;
 
-      // Apply touch calibration offset if input is touch
-      let adjClientX = clientX;
-      let adjClientY = clientY;
-      if (pointerType === 'touch' && touchSettings) {
-        adjClientX += touchSettings.offsetX;
-        adjClientY += touchSettings.offsetY;
+      let screenX = clientX;
+      let screenY = clientY;
+
+      if (pointerType === 'touch' && touchSettings?.inputMode === 'finger_calibrated') {
+        screenX += touchSettings.offsetX || 0;
+        screenY += touchSettings.offsetY || 0;
       }
 
-      let dx = (adjClientX - centerX) / transform.zoom;
-      let dy = (adjClientY - centerY) / transform.zoom;
+      let relX = screenX - (containerCenterX + transform.x);
+      let relY = screenY - (containerCenterY + transform.y);
 
-      // Un-rotate if rotated
-      if (transform.rotation !== 0) {
-        const rad = (-transform.rotation * Math.PI) / 180;
-        const cos = Math.cos(rad);
-        const sin = Math.sin(rad);
-        const rx = dx * cos - dy * sin;
-        const ry = dx * sin + dy * cos;
-        dx = rx;
-        dy = ry;
-      }
-
-      // Un-flip if horizontally flipped
       if (transform.flipH) {
-        dx = -dx;
+        relX = -relX;
       }
 
-      const x = dx + canvasWidth / 2;
-      const y = dy + canvasHeight / 2;
-      return { x, y };
+      const rad = (-transform.rotation * Math.PI) / 180;
+      const unrotX = relX * Math.cos(rad) - relY * Math.sin(rad);
+      const unrotY = relX * Math.sin(rad) + relY * Math.cos(rad);
+
+      const canvasX = unrotX / transform.zoom + canvasWidth / 2;
+      const canvasY = unrotY / transform.zoom + canvasHeight / 2;
+
+      return { x: canvasX, y: canvasY };
     },
-    [transform, canvasWidth, canvasHeight, touchSettings]
+    [
+      transform.x,
+      transform.y,
+      transform.zoom,
+      transform.rotation,
+      transform.flipH,
+      canvasWidth,
+      canvasHeight,
+      touchSettings,
+    ]
   );
 
-  // Sample composite color from all visible layers at (x, y)
-  const sampleColorAt = (x: number, y: number): string | null => {
-    const off = document.createElement('canvas');
-    off.width = 1;
-    off.height = 1;
-    const ctx = off.getContext('2d');
-    if (!ctx) return null;
+  // Sample RGBA color directly from composited canvas stack
+  const sampleColorAt = useCallback(
+    (x: number, y: number) => {
+      const sampleCanvas = document.createElement('canvas');
+      sampleCanvas.width = 1;
+      sampleCanvas.height = 1;
+      const sCtx = sampleCanvas.getContext('2d');
+      if (!sCtx) return null;
 
-    if (canvasBgColor !== 'transparent') {
-      ctx.fillStyle = canvasBgColor;
-      ctx.fillRect(0, 0, 1, 1);
-    }
-
-    layers.forEach((l) => {
-      if (l.visible && l.canvas) {
-        ctx.globalAlpha = l.opacity;
-        ctx.globalCompositeOperation = l.blendMode;
-        ctx.drawImage(l.canvas, -Math.floor(x), -Math.floor(y));
+      if (canvasBgColor !== 'transparent') {
+        sCtx.fillStyle = canvasBgColor;
+        sCtx.fillRect(0, 0, 1, 1);
       }
-    });
 
-    const d = ctx.getImageData(0, 0, 1, 1).data;
-    const toHex = (n: number) => n.toString(16).padStart(2, '0');
-    return `#${toHex(d[0])}${toHex(d[1])}${toHex(d[2])}`;
+      for (const layer of layers) {
+        if (!layer.visible || !layer.canvas) continue;
+        sCtx.save();
+        sCtx.globalAlpha = layer.opacity;
+        sCtx.globalCompositeOperation = layer.blendMode;
+        sCtx.drawImage(layer.canvas, x, y, 1, 1, 0, 0, 1, 1);
+        sCtx.restore();
+      }
+
+      const pixel = sCtx.getImageData(0, 0, 1, 1).data;
+      if (pixel[3] === 0) return null;
+      const hex =
+        '#' +
+        ('000000' + ((pixel[0] << 16) | (pixel[1] << 8) | pixel[2]).toString(16)).slice(-6);
+      return hex;
+    },
+    [layers, canvasBgColor]
+  );
+
+  // Ortho / Angle Snapping Helper for CAD: snaps angle between p1 and p2 to multiples of 45 deg
+  const applyOrthoSnap = (p1: { x: number; y: number }, p2: { x: number; y: number }) => {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 4) return p2;
+
+    const angle = Math.atan2(dy, dx);
+    const snapStep = Math.PI / 4; // 45 degrees
+    const snappedAngle = Math.round(angle / snapStep) * snapStep;
+    return {
+      x: p1.x + Math.cos(snappedAngle) * dist,
+      y: p1.y + Math.sin(snappedAngle) * dist,
+    };
   };
 
-  // Wheel to zoom or pan
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom
-      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-      onTransformChange((prev) => ({
-        ...prev,
-        zoom: Math.min(8.0, Math.max(0.1, prev.zoom * zoomFactor)),
-      }));
-    } else {
-      // Pan with trackpad or mouse wheel
-      onTransformChange((prev) => ({
-        ...prev,
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY,
-      }));
-    }
+  // Grid Snapping Helper
+  const applyGridSnap = (p: { x: number; y: number }, gridSize = 20) => {
+    return {
+      x: Math.round(p.x / gridSize) * gridSize,
+      y: Math.round(p.y / gridSize) * gridSize,
+    };
   };
 
-  // Pointer Down
-  const handlePointerDown = (e: React.PointerEvent) => {
-    // Prevent synthetic mouse events or browser gestures
-    e.preventDefault();
+  // Hit-test active layer's vector paths & nodes for CAD Edit mode
+  const findHitCadNodeOrPath = (coords: { x: number; y: number }) => {
+    const activeLayer = layers.find((l) => l.id === activeLayerId);
+    if (!activeLayer || !activeLayer.vectorPaths) return null;
 
-    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const hitRadius = 8 / transform.zoom;
 
-    // Detect two-finger multi-touch for mobile pinch & pan
-    if (activePointersRef.current.size >= 2) {
-      // If a stroke just started right before finger 2 touched (accidental multi-touch tap mark)
-      if (isDrawing && preStrokeSnapshotRef.current && strokePointCountRef.current <= 2) {
-        const activeLayer = layers.find((l) => l.id === activeLayerId);
-        if (activeLayer && activeLayer.ctx) {
-          activeLayer.ctx.putImageData(preStrokeSnapshotRef.current, 0, 0);
+    // First check selected path's handles and nodes
+    if (selectedVectorPathId) {
+      const selectedPath = activeLayer.vectorPaths.find((p) => p.id === selectedVectorPathId);
+      if (selectedPath) {
+        // Check handles of selected node first
+        if (selectedNodeIndex !== null && selectedPath.nodes[selectedNodeIndex]) {
+          const node = selectedPath.nodes[selectedNodeIndex];
+          if (node.handleOut && Math.hypot(coords.x - node.handleOut.x, coords.y - node.handleOut.y) <= hitRadius) {
+            return { path: selectedPath, nodeIndex: selectedNodeIndex, handle: 'handleOut' as const };
+          }
+          if (node.handleIn && Math.hypot(coords.x - node.handleIn.x, coords.y - node.handleIn.y) <= hitRadius) {
+            return { path: selectedPath, nodeIndex: selectedNodeIndex, handle: 'handleIn' as const };
+          }
+        }
+
+        // Check anchor nodes
+        for (let i = 0; i < selectedPath.nodes.length; i++) {
+          const node = selectedPath.nodes[i];
+          if (Math.hypot(coords.x - node.x, coords.y - node.y) <= hitRadius) {
+            return { path: selectedPath, nodeIndex: i, handle: 'node' as const };
+          }
         }
       }
+    }
 
+    // Check all paths on layer for path selection
+    for (const path of activeLayer.vectorPaths) {
+      for (let i = 0; i < path.nodes.length; i++) {
+        const node = path.nodes[i];
+        if (Math.hypot(coords.x - node.x, coords.y - node.y) <= hitRadius + (path.strokeWidth || 2)) {
+          return { path, nodeIndex: i, handle: 'node' as const };
+        }
+      }
+    }
+
+    return null;
+  };
+
+  // Find vector text hit at coords
+  const findHitVectorText = (coords: { x: number; y: number }) => {
+    const activeLayer = layers.find((l) => l.id === activeLayerId);
+    if (!activeLayer || !activeLayer.vectorTexts) return null;
+
+    const pCtx = previewCanvasRef.current?.getContext('2d');
+    if (!pCtx) return null;
+
+    for (let i = activeLayer.vectorTexts.length - 1; i >= 0; i--) {
+      const t = activeLayer.vectorTexts[i];
+      const bounds = measureVectorTextBounds(pCtx, t);
+      if (
+        coords.x >= bounds.x &&
+        coords.x <= bounds.x + bounds.width &&
+        coords.y >= bounds.y &&
+        coords.y <= bounds.y + bounds.height
+      ) {
+        return t;
+      }
+    }
+    return null;
+  };
+
+  // ----------------------------------------------------
+  // Pointer Event Handlers
+  // ----------------------------------------------------
+  const handlePointerDown = (e: React.PointerEvent) => {
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // Multi-touch gestures tracking (Pinch-to-zoom / Pan)
+    if (activePointersRef.current.size === 2) {
       setIsDrawing(false);
-      setIsPanning(false);
-      lastPointRef.current = null;
       dragStartPointRef.current = null;
 
       const pts: { x: number; y: number }[] = Array.from(activePointersRef.current.values());
@@ -275,11 +424,12 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         y: (pts[0].y + pts[1].y) / 2,
       };
       pinchStartTransformRef.current = { x: transform.x, y: transform.y };
-      pinchStartAngleRef.current = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) * (180 / Math.PI);
+      pinchStartAngleRef.current =
+        Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) * (180 / Math.PI);
       return;
     }
 
-    // Palm Rejection: If in 'stylus_only' mode and touch input occurs, pan instead of drawing
+    // Palm Rejection in 'stylus_only' mode
     if (touchSettings?.inputMode === 'stylus_only' && e.pointerType === 'touch') {
       setIsPanning(true);
       setPanStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
@@ -287,7 +437,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       return;
     }
 
-    // Check if middle click or space is held or pan tool is active
+    // Space held or Middle Mouse or Pan tool
     if (e.button === 1 || isSpacePressed || activeTool === 'pan') {
       setIsPanning(true);
       setPanStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
@@ -295,12 +445,12 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       return;
     }
 
-    if (e.button !== 0) return; // Only primary button for drawing
+    if (e.button !== 0) return; // Only primary button
 
-    const coords = clientToCanvasCoords(e.clientX, e.clientY, e.pointerType);
+    let coords = clientToCanvasCoords(e.clientX, e.clientY, e.pointerType);
     if (!coords) return;
 
-    // Zoom tool click
+    // Zoom tool
     if (activeTool === 'zoom') {
       const factor = e.altKey ? 0.75 : 1.33;
       onTransformChange((prev) => ({
@@ -324,6 +474,124 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       return;
     }
 
+    // ==========================================
+    // 1. TEXT TOOL INTERACTION
+    // ==========================================
+    if (activeTool === 'text') {
+      const hitText = findHitVectorText(coords);
+      if (hitText) {
+        onSelectVectorText?.(hitText.id);
+
+        const now = Date.now();
+        if (
+          lastTextClickTimeRef.current.id === hitText.id &&
+          now - lastTextClickTimeRef.current.time < 350
+        ) {
+          // Double-click -> Edit Text Modal
+          onEditVectorText?.(hitText);
+          return;
+        }
+        lastTextClickTimeRef.current = { id: hitText.id, time: now };
+
+        // Begin dragging text
+        isDraggingTextRef.current = true;
+        textDragOffsetRef.current = {
+          x: coords.x - hitText.x,
+          y: coords.y - hitText.y,
+        };
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        return;
+      }
+
+      // Clicked on empty canvas -> Create new text at coords
+      onSelectVectorText?.(null);
+      onTextPlace(coords);
+      return;
+    }
+
+    // ==========================================
+    // 2. 2D CAD VECTOR TOOL INTERACTION
+    // ==========================================
+    if (activeTool === 'vector') {
+      if (isGridSnap) {
+        coords = applyGridSnap(coords, 20);
+      }
+
+      if (vectorCadMode === 'edit') {
+        const hit = findHitCadNodeOrPath(coords);
+        if (hit) {
+          onSelectVectorPath?.(hit.path.id);
+          onSelectNodeIndex?.(hit.nodeIndex);
+
+          draggedCadTargetRef.current = {
+            type: hit.handle === 'node' ? 'node' : hit.handle === 'handleOut' ? 'handleOut' : 'handleIn',
+            index: hit.nodeIndex,
+            origX: coords.x,
+            origY: coords.y,
+          };
+          setIsDrawing(true);
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          return;
+        }
+
+        // Clicked outside any path in edit mode
+        onSelectVectorPath?.(null);
+        onSelectNodeIndex?.(null);
+        return;
+      }
+
+      // --- Draw Mode (Point-by-point polygon & Bezier) ---
+      // Check if clicking near start node to close polygon
+      if (inProgressNodes.length >= 2) {
+        const startNode = inProgressNodes[0];
+        const distToStart = Math.hypot(coords.x - startNode.x, coords.y - startNode.y);
+        if (distToStart <= 14 / transform.zoom) {
+          // Close and commit path!
+          const newPath: VectorPath = {
+            id: `vpath_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            nodes: inProgressNodes,
+            closed: true,
+            strokeColor: vectorStrokeColor,
+            strokeWidth: vectorStrokeWidth,
+            strokeDash: vectorStrokeDash as 'solid' | 'dashed' | 'dotted',
+            strokeCap: 'round',
+            strokeJoin: 'round',
+            fillColor: vectorFillColor,
+            opacity: 1,
+            timestamp: Date.now(),
+          };
+          onCommitVectorPath?.(newPath);
+          onInProgressNodesChange?.([]);
+          // Clear preview
+          const pCtx = previewCanvasRef.current?.getContext('2d');
+          if (pCtx) pCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+          return;
+        }
+      }
+
+      // Check ortho snapping if shift held or isOrtho
+      if ((e.shiftKey || isOrtho) && inProgressNodes.length > 0) {
+        const prevNode = inProgressNodes[inProgressNodes.length - 1];
+        coords = applyOrthoSnap(prevNode, coords);
+      }
+
+      const newNode: VectorNode = {
+        x: coords.x,
+        y: coords.y,
+        type: 'corner',
+      };
+
+      const updated = [...inProgressNodes, newNode];
+      onInProgressNodesChange?.(updated);
+
+      isDraggingTangentRef.current = true;
+      activePlacedNodeIndexRef.current = updated.length - 1;
+      dragStartPointRef.current = coords;
+      setIsDrawing(true);
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      return;
+    }
+
     // Paint bucket / Flood fill
     if (activeTool === 'bucket') {
       const colorRgb = parseColor(primaryColor);
@@ -340,7 +608,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       return;
     }
 
-    // Shape drawing start (line, rect, ellipse)
+    // Shape / Line drawing start
     if (activeTool === 'line') {
       dragStartPointRef.current = coords;
       setIsDrawing(true);
@@ -352,7 +620,6 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     setIsDrawing(true);
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
 
-    // Extract Wacom stylus telemetry
     const {
       state: stylusState,
       mappedPressure,
@@ -366,7 +633,6 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     setCurrentStylusState(stylusState);
     onStylusUpdate?.(stylusState);
 
-    // Save snapshot of layer for clean undo if a 2nd finger lands immediately
     try {
       preStrokeSnapshotRef.current = activeLayer.ctx.getImageData(0, 0, canvasWidth, canvasHeight);
     } catch {
@@ -399,7 +665,6 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     const isEraser = isWacomEraser || activeTool === 'eraser' || isTransparentMode;
     const colorRgb = parseColor(primaryColor);
 
-    // Initialize physical paint smear and pigment state
     strokeColorStateRef.current = {
       r: colorRgb.r,
       g: colorRgb.g,
@@ -407,124 +672,174 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       carriedR: colorRgb.r,
       carriedG: colorRgb.g,
       carriedB: colorRgb.b,
-      carriedStrength: 0,
+      hasCarriedColor: false,
     };
 
     if (isEraser && activeLayer.type === 'vector') {
       vectorEraseAt(activeLayer, coords.x, coords.y, brush.size / 2);
+    } else {
+      drawBrushStamp(
+        activeLayer.ctx,
+        smoothed.x,
+        smoothed.y,
+        brush.size / 2,
+        brush,
+        colorRgb,
+        pressure,
+        isEraser,
+        strokeColorStateRef.current || undefined,
+        tiltX,
+        tiltY,
+        twist
+      );
     }
-
-    const baseRadius = brush.size / 2;
-    const effectiveRadius = brush.pressureSize
-      ? baseRadius * Math.max(0.15, smoothed.pressure)
-      : baseRadius;
-
-    drawBrushStamp(
-      activeLayer.ctx,
-      smoothed.x,
-      smoothed.y,
-      effectiveRadius,
-      brush,
-      colorRgb,
-      smoothed.pressure,
-      isEraser,
-      strokeColorStateRef.current ?? undefined,
-      smoothed.tiltX,
-      smoothed.tiltY,
-      smoothed.twist
-    );
   };
 
-  // Pointer Move
   const handlePointerMove = (e: React.PointerEvent) => {
-    // Keep pointer coordinates updated
-    if (activePointersRef.current.has(e.pointerId)) {
+    let coords = clientToCanvasCoords(e.clientX, e.clientY, e.pointerType);
+    if (!coords) return;
+
+    setCursorPos(coords);
+    onCursorMove(coords, currentPressure);
+
+    // Multi-touch gestures (Pinch-to-zoom & two-finger Pan)
+    if (activePointersRef.current.size === 2) {
       activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    }
-
-    // Active two-finger pinch-to-zoom / two-finger pan & optional rotation
-    if (
-      activePointersRef.current.size >= 2 &&
-      pinchStartDistRef.current &&
-      pinchStartMidpointRef.current &&
-      containerRef.current
-    ) {
       const pts: { x: number; y: number }[] = Array.from(activePointersRef.current.values());
-      const newDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      const scale = pinchStartDistRef.current > 0 ? newDist / pinchStartDistRef.current : 1;
-      const newMid = {
-        x: (pts[0].x + pts[1].x) / 2,
-        y: (pts[0].y + pts[1].y) / 2,
-      };
 
-      const rect = containerRef.current.getBoundingClientRect();
-      const containerCenterX = rect.left + rect.width / 2;
-      const containerCenterY = rect.top + rect.height / 2;
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (pinchStartDistRef.current && dist > 0) {
+        const factor = dist / pinchStartDistRef.current;
+        const newZoom = Math.min(8.0, Math.max(0.1, pinchStartZoomRef.current * factor));
 
-      // Distance of initial midpoint from container center
-      const v0x = pinchStartMidpointRef.current.x - containerCenterX;
-      const v0y = pinchStartMidpointRef.current.y - containerCenterY;
+        const midX = (pts[0].x + pts[1].x) / 2;
+        const midY = (pts[0].y + pts[1].y) / 2;
+        const deltaX = midX - (pinchStartMidpointRef.current?.x || midX);
+        const deltaY = midY - (pinchStartMidpointRef.current?.y || midY);
 
-      // Distance of current midpoint from container center
-      const vx = newMid.x - containerCenterX;
-      const vy = newMid.y - containerCenterY;
+        let newRotation = transform.rotation;
+        if (touchSettings?.twoFingerRotate) {
+          const currentAngle =
+            Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) * (180 / Math.PI);
+          const angleDelta = currentAngle - pinchStartAngleRef.current;
+          newRotation = (newRotation + angleDelta) % 360;
+          pinchStartAngleRef.current = currentAngle;
+        }
 
-      const targetZoom = Math.min(8.0, Math.max(0.1, pinchStartZoomRef.current * scale));
-      const zoomRatio = targetZoom / pinchStartZoomRef.current;
-
-      // Exact zoom pinned around touch midpoint
-      const newTransformX = vx - (v0x - pinchStartTransformRef.current.x) * zoomRatio;
-      const newTransformY = vy - (v0y - pinchStartTransformRef.current.y) * zoomRatio;
-
-      let newRotation = transform.rotation;
-      if (touchSettings?.twoFingerRotate) {
-        const currentAngle = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) * (180 / Math.PI);
-        const deltaAngle = currentAngle - pinchStartAngleRef.current;
-        newRotation = Math.round((transform.rotation + deltaAngle) % 360);
-        pinchStartAngleRef.current = currentAngle;
+        onTransformChange((prev) => ({
+          ...prev,
+          zoom: newZoom,
+          x: pinchStartTransformRef.current.x + deltaX,
+          y: pinchStartTransformRef.current.y + deltaY,
+          rotation: newRotation,
+        }));
       }
-
-      onTransformChange((prev) => ({
-        ...prev,
-        zoom: targetZoom,
-        x: newTransformX,
-        y: newTransformY,
-        rotation: newRotation,
-      }));
       return;
     }
 
     // Panning canvas
     if (isPanning) {
-      onTransformChange((prev) => ({
-        ...prev,
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
-      }));
+      const newX = e.clientX - panStart.x;
+      const newY = e.clientY - panStart.y;
+      onTransformChange((prev) => ({ ...prev, x: newX, y: newY }));
       return;
     }
 
-    const coords = clientToCanvasCoords(e.clientX, e.clientY, e.pointerType);
-    if (!coords) return;
+    // ==========================================
+    // 1. TEXT DRAGGING
+    // ==========================================
+    if (activeTool === 'text') {
+      if (isDraggingTextRef.current && selectedTextId) {
+        const activeLayer = layers.find((l) => l.id === activeLayerId);
+        if (activeLayer && activeLayer.vectorTexts) {
+          const textItem = activeLayer.vectorTexts.find((t) => t.id === selectedTextId);
+          if (textItem) {
+            textItem.x = coords.x - textDragOffsetRef.current.x;
+            textItem.y = coords.y - textDragOffsetRef.current.y;
+            reRenderVectorLayer(activeLayer);
+          }
+        }
+      }
+      renderCadAndTextOverlay();
+      return;
+    }
 
-    // Extract Wacom stylus telemetry
-    const {
-      state: stylusState,
-      mappedPressure,
-      tiltX,
-      tiltY,
-      twist,
-      altitude,
-      azimuth,
-      isWacomEraser,
-    } = extractStylusTelemetry(e);
-    setCurrentStylusState(stylusState);
-    onStylusUpdate?.(stylusState);
+    // ==========================================
+    // 2. VECTOR CAD TOOL INTERACTIONS
+    // ==========================================
+    if (activeTool === 'vector') {
+      const activeLayer = layers.find((l) => l.id === activeLayerId);
 
-    const pressure = mappedPressure;
-    setCursorPos(coords);
-    setCurrentPressure(pressure);
-    onCursorMove(coords, pressure);
+      if (isGridSnap) {
+        coords = applyGridSnap(coords, 20);
+      }
+
+      if (vectorCadMode === 'edit') {
+        if (isDrawing && draggedCadTargetRef.current && selectedVectorPathId && activeLayer?.vectorPaths) {
+          const path = activeLayer.vectorPaths.find((p) => p.id === selectedVectorPathId);
+          if (path && path.nodes[draggedCadTargetRef.current.index]) {
+            const target = draggedCadTargetRef.current;
+            const node = path.nodes[target.index];
+
+            if (target.type === 'node') {
+              const dx = coords.x - node.x;
+              const dy = coords.y - node.y;
+              node.x = coords.x;
+              node.y = coords.y;
+              if (node.handleIn) {
+                node.handleIn.x += dx;
+                node.handleIn.y += dy;
+              }
+              if (node.handleOut) {
+                node.handleOut.x += dx;
+                node.handleOut.y += dy;
+              }
+            } else if (target.type === 'handleOut') {
+              node.handleOut = { x: coords.x, y: coords.y };
+              if (node.type === 'smooth') {
+                // Mirror handleIn symmetrically
+                const dx = coords.x - node.x;
+                const dy = coords.y - node.y;
+                node.handleIn = { x: node.x - dx, y: node.y - dy };
+              }
+            } else if (target.type === 'handleIn') {
+              node.handleIn = { x: coords.x, y: coords.y };
+              if (node.type === 'smooth') {
+                const dx = coords.x - node.x;
+                const dy = coords.y - node.y;
+                node.handleOut = { x: node.x - dx, y: node.y - dy };
+              }
+            }
+
+            reRenderVectorLayer(activeLayer);
+          }
+        }
+        renderCadAndTextOverlay(coords);
+        return;
+      }
+
+      // Draw mode: pulling tangent handles during point placement
+      if (isDrawing && isDraggingTangentRef.current && activePlacedNodeIndexRef.current >= 0) {
+        const nodeIndex = activePlacedNodeIndexRef.current;
+        if (inProgressNodes[nodeIndex]) {
+          const anchor = inProgressNodes[nodeIndex];
+          const dist = Math.hypot(coords.x - anchor.x, coords.y - anchor.y);
+          if (dist > 3) {
+            const updated = [...inProgressNodes];
+            updated[nodeIndex] = {
+              ...anchor,
+              type: 'smooth',
+              handleOut: { x: coords.x, y: coords.y },
+              handleIn: { x: anchor.x - (coords.x - anchor.x), y: anchor.y - (coords.y - anchor.y) },
+            };
+            onInProgressNodesChange?.(updated);
+          }
+        }
+      }
+
+      renderCadAndTextOverlay(coords);
+      return;
+    }
 
     if (!isDrawing) return;
     strokePointCountRef.current += 1;
@@ -561,6 +876,14 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     const activeLayer = layers.find((l) => l.id === activeLayerId);
     if (!activeLayer || activeLayer.locked || !activeLayer.visible) return;
 
+    const { state: stylusState, mappedPressure, tiltX, tiltY, twist, altitude, azimuth, isWacomEraser } =
+      extractStylusTelemetry(e);
+    setCurrentStylusState(stylusState);
+    onStylusUpdate?.(stylusState);
+
+    const pressure = mappedPressure;
+    setCurrentPressure(pressure);
+
     const rawPoint: Point = {
       x: coords.x,
       y: coords.y,
@@ -578,14 +901,12 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     const smoothed = stabilizerRef.current.addPoint(rawPoint);
     currentStrokePointsRef.current.push(smoothed);
 
-    if (lastPointRef.current) {
-      const isEraser = isWacomEraser || activeTool === 'eraser' || isTransparentMode;
-      const colorRgb = parseColor(primaryColor);
+    const isEraser = isWacomEraser || activeTool === 'eraser' || isTransparentMode;
+    const colorRgb = parseColor(primaryColor);
 
-      if (isEraser && activeLayer.type === 'vector') {
-        vectorEraseAt(activeLayer, coords.x, coords.y, brush.size / 2);
-      }
-
+    if (isEraser && activeLayer.type === 'vector') {
+      vectorEraseAt(activeLayer, coords.x, coords.y, brush.size / 2);
+    } else if (lastPointRef.current) {
       drawSegment(
         activeLayer.ctx,
         lastPointRef.current,
@@ -593,15 +914,15 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         brush,
         colorRgb,
         isEraser,
-        strokeColorStateRef.current ?? undefined
+        strokeColorStateRef.current || undefined
       );
     }
     lastPointRef.current = smoothed;
   };
 
-  // Pointer Up
   const handlePointerUp = (e: React.PointerEvent) => {
     activePointersRef.current.delete(e.pointerId);
+
     if (activePointersRef.current.size < 2) {
       pinchStartDistRef.current = null;
       pinchStartMidpointRef.current = null;
@@ -612,47 +933,31 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       return;
     }
 
-    if (!isDrawing) return;
-    setIsDrawing(false);
-    preStrokeSnapshotRef.current = null;
-    strokePointCountRef.current = 0;
-
-    const activeLayer = layers.find((l) => l.id === activeLayerId);
-
-    // Finalize Vector Layer Stroke & Smart Correction
-    if (activeLayer && activeLayer.type === 'vector' && currentStrokePointsRef.current.length > 0) {
-      let finalPoints = [...currentStrokePointsRef.current];
-
-      // Smart Stroke Smoothing & Hand-Tremor Filter
-      if (brush.smartCorrection || brush.stabilization >= 12) {
-        finalPoints = smartCorrectStroke(finalPoints, true);
+    // Text tool end drag
+    if (activeTool === 'text') {
+      if (isDraggingTextRef.current) {
+        isDraggingTextRef.current = false;
+        onStrokeEnd();
       }
-
-      // Line-end Inking Tapering
-      if (brush.taperFactor && brush.taperFactor > 0) {
-        finalPoints = applyStrokeTapering(finalPoints, brush.taperFactor);
-      }
-
-      const isEraser = activeTool === 'eraser' || isTransparentMode;
-      const newStroke: VectorStroke = {
-        id: `vstroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        points: finalPoints,
-        brush: { ...brush },
-        color: primaryColor,
-        isEraser,
-        timestamp: Date.now(),
-      };
-
-      activeLayer.vectorStrokes = [...(activeLayer.vectorStrokes || []), newStroke];
-
-      // If smart correction or tapering modified points, re-render the vector layer cleanly
-      if (brush.smartCorrection || (brush.taperFactor && brush.taperFactor > 0)) {
-        reRenderVectorLayer(activeLayer);
-      }
+      setIsDrawing(false);
+      return;
     }
 
-    currentStrokePointsRef.current = [];
-    strokeColorStateRef.current = null;
+    // Vector CAD end drag
+    if (activeTool === 'vector') {
+      if (isDraggingTangentRef.current) {
+        isDraggingTangentRef.current = false;
+      }
+      if (draggedCadTargetRef.current) {
+        draggedCadTargetRef.current = null;
+        onStrokeEnd();
+      }
+      setIsDrawing(false);
+      return;
+    }
+
+    if (!isDrawing) return;
+    setIsDrawing(false);
 
     // Commit Line if active
     if (activeTool === 'line' && dragStartPointRef.current) {
@@ -670,72 +975,322 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         activeLayer.ctx.stroke();
         activeLayer.ctx.restore();
 
-        // Clear preview canvas
-        if (previewCanvasRef.current) {
-          const pCtx = previewCanvasRef.current.getContext('2d');
-          pCtx?.clearRect(0, 0, canvasWidth, canvasHeight);
-        }
+        const pCtx = previewCanvasRef.current?.getContext('2d');
+        if (pCtx) pCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+      }
+      dragStartPointRef.current = null;
+      onStrokeEnd();
+      return;
+    }
+
+    if (activeTool === 'select') {
+      dragStartPointRef.current = null;
+      return;
+    }
+
+    const activeLayer = layers.find((l) => l.id === activeLayerId);
+    if (!activeLayer) return;
+
+    if (activeLayer.type === 'vector' && currentStrokePointsRef.current.length > 0) {
+      const isEraser = activeTool === 'eraser' || isTransparentMode;
+      const newStroke: VectorStroke = {
+        id: `stroke-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        points: currentStrokePointsRef.current,
+        brush: { ...brush },
+        color: primaryColor,
+        isEraser,
+        timestamp: Date.now(),
+      };
+
+      activeLayer.vectorStrokes = [...(activeLayer.vectorStrokes || []), newStroke];
+      if (brush.smartCorrection || (brush.taperFactor && brush.taperFactor > 0)) {
+        reRenderVectorLayer(activeLayer);
       }
     }
 
-    dragStartPointRef.current = null;
+    currentStrokePointsRef.current = [];
+    strokeColorStateRef.current = null;
     lastPointRef.current = null;
-    stabilizerRef.current.reset();
+    dragStartPointRef.current = null;
     onStrokeEnd();
   };
 
-  // Render brush size indicator ring on cursor overlay with Wacom tilt & rotation dynamics
+  // ----------------------------------------------------
+  // Live Overlay Rendering (CAD Vertices & Text Bounding Box)
+  // ----------------------------------------------------
+  const renderCadAndTextOverlay = useCallback(
+    (curPos = cursorPos) => {
+      const pCanvas = previewCanvasRef.current;
+      if (!pCanvas) return;
+      const ctx = pCanvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+      const activeLayer = layers.find((l) => l.id === activeLayerId);
+
+      // 1. Text Selection Bounding Box Overlay
+      if (activeTool === 'text' && activeLayer?.vectorTexts) {
+        for (const t of activeLayer.vectorTexts) {
+          const isSelected = t.id === selectedTextId;
+          const bounds = measureVectorTextBounds(ctx, t);
+
+          ctx.save();
+          if (isSelected) {
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(bounds.x - 4, bounds.y - 4, bounds.width + 8, bounds.height + 8);
+
+            // Corner grip knobs
+            ctx.fillStyle = '#38bdf8';
+            ctx.fillRect(bounds.x - 7, bounds.y - 7, 6, 6);
+            ctx.fillRect(bounds.x + bounds.width + 1, bounds.y - 7, 6, 6);
+            ctx.fillRect(bounds.x - 7, bounds.y + bounds.height + 1, 6, 6);
+            ctx.fillRect(bounds.x + bounds.width + 1, bounds.y + bounds.height + 1, 6, 6);
+          }
+          ctx.restore();
+        }
+      }
+
+      // 2. Vector CAD Overlay
+      if (activeTool === 'vector') {
+        ctx.save();
+
+        // In Draw Mode: render in-progress polygon & Bezier curves
+        if (vectorCadMode === 'draw') {
+          if (inProgressNodes.length > 0) {
+            // Draw in-progress path
+            const tempPath: VectorPath = {
+              id: 'temp_cad_draw',
+              nodes: inProgressNodes,
+              closed: false,
+              strokeColor: vectorStrokeColor,
+              strokeWidth: vectorStrokeWidth,
+              strokeDash: vectorStrokeDash as 'solid' | 'dashed' | 'dotted',
+              fillColor: 'none',
+              opacity: 0.9,
+            };
+            renderVectorPath(ctx, tempPath);
+
+            // Draw rubberband line to cursor
+            if (curPos) {
+              const lastNode = inProgressNodes[inProgressNodes.length - 1];
+              ctx.beginPath();
+              ctx.setLineDash([4, 4]);
+              ctx.strokeStyle = '#60a5fa';
+              ctx.lineWidth = 1.5;
+              ctx.moveTo(lastNode.x, lastNode.y);
+              ctx.lineTo(curPos.x, curPos.y);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            }
+
+            // Draw vertex nodes
+            inProgressNodes.forEach((node, idx) => {
+              const isFirst = idx === 0;
+              const isStartSnapped =
+                isFirst &&
+                curPos &&
+                inProgressNodes.length >= 2 &&
+                Math.hypot(curPos.x - node.x, curPos.y - node.y) <= 14;
+
+              ctx.save();
+              if (isStartSnapped) {
+                // Pulsing green snap target for closing path
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 10, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.fillStyle = '#22c55e';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText('Close Polygon', node.x + 14, node.y + 4);
+              }
+
+              ctx.fillStyle = isFirst ? '#22c55e' : node.type === 'smooth' ? '#38bdf8' : '#ffffff';
+              ctx.strokeStyle = '#000000';
+              ctx.lineWidth = 1.5;
+
+              if (node.type === 'smooth') {
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+              } else {
+                ctx.fillRect(node.x - 3.5, node.y - 3.5, 7, 7);
+                ctx.strokeRect(node.x - 3.5, node.y - 3.5, 7, 7);
+              }
+
+              // Draw Bezier handles if present
+              if (node.handleOut) {
+                ctx.strokeStyle = '#38bdf8';
+                ctx.beginPath();
+                ctx.moveTo(node.x, node.y);
+                ctx.lineTo(node.handleOut.x, node.handleOut.y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(node.handleOut.x, node.handleOut.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              if (node.handleIn) {
+                ctx.strokeStyle = '#38bdf8';
+                ctx.beginPath();
+                ctx.moveTo(node.x, node.y);
+                ctx.lineTo(node.handleIn.x, node.handleIn.y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(node.handleIn.x, node.handleIn.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              ctx.restore();
+            });
+          }
+        } else if (vectorCadMode === 'edit' && activeLayer?.vectorPaths) {
+          // In Edit Mode: highlight selected path & nodes
+          const selPath = activeLayer.vectorPaths.find((p) => p.id === selectedVectorPathId);
+          if (selPath) {
+            // Draw path outline highlight
+            ctx.save();
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = Math.max(1, (selPath.strokeWidth || 2) + 2);
+            ctx.globalAlpha = 0.4;
+            renderVectorPath(ctx, selPath);
+            ctx.restore();
+
+            // Draw nodes
+            selPath.nodes.forEach((node, idx) => {
+              const isNodeSelected = idx === selectedNodeIndex;
+
+              ctx.save();
+              ctx.fillStyle = isNodeSelected ? '#fbbf24' : '#38bdf8';
+              ctx.strokeStyle = '#000000';
+              ctx.lineWidth = 1.5;
+
+              if (node.type === 'smooth') {
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, isNodeSelected ? 5.5 : 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+              } else {
+                const s = isNodeSelected ? 5 : 3.5;
+                ctx.fillRect(node.x - s, node.y - s, s * 2, s * 2);
+                ctx.strokeRect(node.x - s, node.y - s, s * 2, s * 2);
+              }
+
+              // Selected node shows Bezier handles
+              if (isNodeSelected) {
+                if (node.handleOut) {
+                  ctx.strokeStyle = '#fbbf24';
+                  ctx.setLineDash([2, 2]);
+                  ctx.beginPath();
+                  ctx.moveTo(node.x, node.y);
+                  ctx.lineTo(node.handleOut.x, node.handleOut.y);
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+                  ctx.fillStyle = '#fbbf24';
+                  ctx.beginPath();
+                  ctx.arc(node.handleOut.x, node.handleOut.y, 4, 0, Math.PI * 2);
+                  ctx.fill();
+                  ctx.stroke();
+                }
+                if (node.handleIn) {
+                  ctx.strokeStyle = '#fbbf24';
+                  ctx.setLineDash([2, 2]);
+                  ctx.beginPath();
+                  ctx.moveTo(node.x, node.y);
+                  ctx.lineTo(node.handleIn.x, node.handleIn.y);
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+                  ctx.fillStyle = '#fbbf24';
+                  ctx.beginPath();
+                  ctx.arc(node.handleIn.x, node.handleIn.y, 4, 0, Math.PI * 2);
+                  ctx.fill();
+                  ctx.stroke();
+                }
+              }
+              ctx.restore();
+            });
+          }
+        }
+        ctx.restore();
+      }
+    },
+    [
+      canvasWidth,
+      canvasHeight,
+      cursorPos,
+      activeTool,
+      activeLayerId,
+      layers,
+      selectedTextId,
+      vectorCadMode,
+      inProgressNodes,
+      vectorStrokeColor,
+      vectorStrokeWidth,
+      vectorStrokeDash,
+      selectedVectorPathId,
+      selectedNodeIndex,
+    ]
+  );
+
+  useEffect(() => {
+    renderCadAndTextOverlay();
+  }, [renderCadAndTextOverlay]);
+
+  // Wheel zoom/scroll
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const zoomFactor = e.deltaY > 0 ? 0.92 : 1.08;
+      onTransformChange((prev) => ({
+        ...prev,
+        zoom: Math.min(8.0, Math.max(0.1, prev.zoom * zoomFactor)),
+      }));
+    } else {
+      onTransformChange((prev) => ({
+        ...prev,
+        x: prev.x - e.deltaX,
+        y: prev.y - e.deltaY,
+      }));
+    }
+  };
+
+  // Cursor brush preview ring
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-    if (cursorPos && !isPanning) {
+    if (cursorPos && !isPanning && activeTool !== 'vector' && activeTool !== 'text') {
       ctx.save();
-      const tiltDist = currentStylusState?.tiltAngle ?? 0;
-      const twist = currentStylusState?.twist ?? 0;
-      const azimuth = currentStylusState?.azimuth ?? 0;
+      const radius = Math.max(2, brush.size / 2);
 
-      // Center at cursorPos
-      ctx.translate(cursorPos.x, cursorPos.y);
-
-      // Rotate with barrel twist or tilt azimuth
-      const effectiveAngle = twist > 0 ? twist : (tiltDist > 10 ? azimuth : (brush.angle || 0));
-      ctx.rotate((effectiveAngle * Math.PI) / 180);
-
-      const r = Math.max(2, brush.size / 2);
-      // If tilted, elongate cursor ellipse along azimuth
-      const tiltFactor = tiltDist > 10 ? Math.min(1.0, (tiltDist - 10) / 60) : 0;
-      const rx = r * (1 + tiltFactor * 1.2);
-      const ry = r * Math.max(0.35, 1 - tiltFactor * 0.55);
-
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+      ctx.arc(cursorPos.x, cursorPos.y, radius, 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
       ctx.beginPath();
-      ctx.ellipse(0, 0, Math.max(1, rx - 1), Math.max(1, ry - 1), 0, 0, Math.PI * 2);
+      ctx.arc(cursorPos.x, cursorPos.y, radius + 1, 0, Math.PI * 2);
       ctx.stroke();
-
-      // If stylus has significant tilt, draw subtle direction orientation tick
-      if (tiltDist > 12) {
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(rx + 6, 0);
-        ctx.stroke();
-      }
 
       ctx.restore();
     }
-  }, [cursorPos, brush.size, brush.angle, transform.zoom, isPanning, currentStylusState]);
+  }, [cursorPos, brush.size, activeTool, isPanning, canvasWidth, canvasHeight]);
+
+  const activeLayer = layers.find((l) => l.id === activeLayerId);
+  const selectedText = activeLayer?.vectorTexts?.find((t) => t.id === selectedTextId);
+  const selectedTextBounds =
+    selectedText && previewCanvasRef.current
+      ? measureVectorTextBounds(previewCanvasRef.current.getContext('2d')!, selectedText)
+      : null;
 
   return (
     <main
@@ -751,7 +1306,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         setCursorPos(null);
         onCursorMove(null, 0);
       }}
-      className="w-full h-full bg-[#1a1a1a] relative overflow-hidden select-none touch-none cursor-crosshair"
+      className="w-full h-full bg-[#1a1a1a] relative overflow-hidden select-none touch-none"
       style={{
         cursor:
           isPanning || isSpacePressed || activeTool === 'pan'
@@ -760,10 +1315,14 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? 'zoom-in'
             : activeTool === 'eyedropper'
             ? 'crosshair'
+            : activeTool === 'vector'
+            ? 'crosshair'
+            : activeTool === 'text'
+            ? 'text'
             : 'crosshair',
       }}
     >
-      {/* Visual Canvas Paper Wrapper with Transformation (Pan, Zoom, Rotate, Flip) */}
+      {/* Visual Canvas Paper Wrapper with Transformation */}
       <div
         id="canvas-paper-viewport"
         className="absolute shadow-2xl shrink-0 flex-none select-none"
@@ -820,7 +1379,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           );
         })}
 
-        {/* Temporary Preview Canvas for interactive shapes (lines, etc.) */}
+        {/* Temporary Preview Canvas for CAD shapes, Bezier tangents, and Line tools */}
         <canvas
           ref={previewCanvasRef}
           width={canvasWidth}
@@ -828,7 +1387,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           className="absolute inset-0 pointer-events-none"
         />
 
-        {/* Cursor / Brush Outline Overlay Canvas */}
+        {/* Cursor Outline Overlay Canvas */}
         <canvas
           ref={overlayCanvasRef}
           width={canvasWidth}
@@ -836,7 +1395,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           className="absolute inset-0 pointer-events-none"
         />
 
-        {/* Selection Marquee Overlay (Dashed border) */}
+        {/* Selection Marquee Overlay */}
         {selection.active && selection.width > 2 && selection.height > 2 && (
           <div
             className="absolute border border-dashed border-cyan-400 bg-cyan-400/10 pointer-events-none animate-pulse"
@@ -849,9 +1408,51 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
             }}
           />
         )}
+
+        {/* Interactive Text Selection Box & Floating Mini Controls */}
+        {activeTool === 'text' && selectedText && selectedTextBounds && (
+          <div
+            className="absolute border border-blue-400 bg-blue-500/10 pointer-events-auto cursor-move select-none"
+            style={{
+              left: `${selectedTextBounds.x - 4}px`,
+              top: `${selectedTextBounds.y - 4}px`,
+              width: `${selectedTextBounds.width + 8}px`,
+              height: `${selectedTextBounds.height + 8}px`,
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              onEditVectorText?.(selectedText);
+            }}
+          >
+            {/* Floating Action Pill */}
+            <div
+              className="absolute -top-7 left-0 flex items-center gap-1.5 bg-[#1e1e1e] border border-white/20 rounded-md px-2 py-0.5 text-[10px] text-white shadow-xl z-20 whitespace-nowrap"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <span className="font-semibold text-blue-300 truncate max-w-[90px]">
+                {selectedText.fontFamily}
+              </span>
+              <span className="text-gray-500">•</span>
+              <button
+                type="button"
+                onClick={() => onEditVectorText?.(selectedText)}
+                className="px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeleteVectorText?.(selectedText.id)}
+                className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/40"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Floating Canvas Telemetry Badge in Bottom-Left (As requested in High Density Theme) */}
+      {/* Floating Canvas Telemetry Badge in Bottom-Left */}
       <div
         id="canvas-telemetry-badge"
         className="absolute bottom-3 left-3 bg-black/80 backdrop-blur-md border border-white/10 rounded-md px-2.5 py-1.5 text-[10px] flex items-center gap-3 text-gray-300 font-mono select-none pointer-events-none shadow-lg z-10"
@@ -860,25 +1461,13 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           X: {cursorPos ? Math.round(cursorPos.x) : 0} Y: {cursorPos ? Math.round(cursorPos.y) : 0}
         </span>
         <span className="text-blue-400 font-semibold">{Math.round(transform.zoom * 100)}%</span>
-        {currentStylusState?.isPen ? (
-          <>
-            <span className="text-green-400 font-medium flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              Wacom Stylus
-            </span>
-            <span className="text-cyan-300">P: {Math.round(currentPressure * 100)}%</span>
-            <span className="text-indigo-300">Tilt: {currentStylusState.tiltAngle}°</span>
-            {currentStylusState.twist > 0 && (
-              <span className="text-purple-300">Twist: {currentStylusState.twist}°</span>
-            )}
-            {currentStylusState.isEraserTip && (
-              <span className="text-amber-400 font-bold bg-amber-500/20 px-1 rounded">ERASER TIP</span>
-            )}
-          </>
-        ) : (
-          <span className="text-green-400 hidden sm:inline">
-            Pressure: {Math.round(currentPressure * 100)}%
+        {activeTool === 'vector' && (
+          <span className="text-cyan-400 font-bold">
+            CAD: {vectorCadMode === 'draw' ? 'PEN DRAW' : 'NODE EDIT'}
           </span>
+        )}
+        {activeTool === 'text' && (
+          <span className="text-indigo-400 font-bold">TYPOGRAPHY</span>
         )}
       </div>
     </main>

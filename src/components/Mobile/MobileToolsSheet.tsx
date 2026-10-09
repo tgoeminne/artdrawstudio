@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   PenTool,
-  Paintbrush,
   Eraser,
   PaintBucket,
   Pipette,
@@ -10,6 +9,7 @@ import {
   Search,
   Minus,
   Check,
+  Type,
 } from 'lucide-react';
 import { ToolType } from '../../types';
 import { MobileBottomSheet } from './MobileBottomSheet';
@@ -30,21 +30,21 @@ export const MobileToolsSheet: React.FC<MobileToolsSheetProps> = ({
   const tools: { id: ToolType; label: string; desc: string; icon: React.ReactNode }[] = [
     {
       id: 'brush',
-      label: 'Pen & Brush',
-      desc: 'Inking, calligraphy & manga pens',
+      label: 'Brush presets',
+      desc: 'Choose pen, pencil, airbrush and paint presets',
       icon: <PenTool size={22} />,
     },
     {
-      id: 'pencil',
-      label: 'Pencil',
-      desc: 'Textured sketching pencil',
-      icon: <Minus size={22} className="-rotate-45" />,
+      id: 'vector',
+      label: 'Vector pen',
+      desc: 'Draw resolution-independent editable strokes',
+      icon: <PenTool size={22} />,
     },
     {
-      id: 'airbrush',
-      label: 'Airbrush & Blend',
-      desc: 'Smooth gradients & paint blending',
-      icon: <Paintbrush size={22} />,
+      id: 'text',
+      label: 'Text',
+      desc: 'Place editable text and choose a font',
+      icon: <Type size={22} />,
     },
     {
       id: 'eraser',

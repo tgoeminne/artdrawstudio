@@ -28,6 +28,7 @@ interface DesktopBrushSelectionMenuProps {
   primaryColor: string;
   onUpdateBrushSize?: (size: number) => void;
   onOpenSettingsPanel?: () => void;
+  onOpenStylusSettings?: () => void;
 }
 
 type BrushCategory = 'all' | 'watercolor' | 'ink' | 'paint' | 'pencil' | 'airbrush' | 'marker';
@@ -40,6 +41,7 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
   primaryColor,
   onUpdateBrushSize,
   onOpenSettingsPanel,
+  onOpenStylusSettings,
 }) => {
   const [activeCategory, setActiveCategory] = useState<BrushCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,6 +51,7 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
 
   // Draggable floating window position
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 56, y: 52 });
+  const [size, setSize] = useState<{ width: number; height: number }>({ width: 520, height: 650 });
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef<{ startX: number; startY: number; posX: number; posY: number }>({
     startX: 0,
@@ -58,6 +61,16 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
   });
 
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = menuRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      setSize({ width: element.offsetWidth, height: element.offsetHeight });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   // Close on Escape
   useEffect(() => {
@@ -87,8 +100,8 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
       const dx = moveEvent.clientX - dragStartRef.current.startX;
       const dy = moveEvent.clientY - dragStartRef.current.startY;
       setPosition({
-        x: Math.max(10, Math.min(window.innerWidth - 360, dragStartRef.current.posX + dx)),
-        y: Math.max(10, Math.min(window.innerHeight - 200, dragStartRef.current.posY + dy)),
+        x: Math.max(10, Math.min(window.innerWidth - size.width - 10, dragStartRef.current.posX + dx)),
+        y: Math.max(10, Math.min(window.innerHeight - 80, dragStartRef.current.posY + dy)),
       });
     };
 
@@ -120,12 +133,12 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
     });
 
     return [
-      { id: 'all', label: 'All Brushes', count: counts.all },
+      { id: 'all', label: 'All', count: counts.all },
       { id: 'watercolor', label: 'Watercolor', count: counts.watercolor },
-      { id: 'ink', label: 'India Ink & Pens', count: counts.ink },
-      { id: 'paint', label: 'Thick Paint & Oils', count: counts.paint },
-      { id: 'pencil', label: 'Pencil & Pastel', count: counts.pencil },
-      { id: 'airbrush', label: 'Airbrush & Spray', count: counts.airbrush },
+      { id: 'ink', label: 'Ink & Pens', count: counts.ink },
+      { id: 'paint', label: 'Paint & Oils', count: counts.paint },
+      { id: 'pencil', label: 'Pencil', count: counts.pencil },
+      { id: 'airbrush', label: 'Airbrush', count: counts.airbrush },
       { id: 'marker', label: 'Marker', count: counts.marker },
     ];
   }, []);
@@ -171,8 +184,16 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
     <div
       ref={menuRef}
       id="desktop-brush-selection-menu"
-      style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      className="fixed z-40 w-[420px] bg-[#222222] border border-[#111111] rounded-lg shadow-2xl flex flex-col select-none overflow-hidden ring-1 ring-white/10"
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        width: `${size.width}px`,
+        height: `${size.height}px`,
+        resize: 'both',
+        maxWidth: 'calc(100vw - 20px)',
+        maxHeight: 'calc(100vh - 20px)',
+      }}
+      className="fixed z-40 min-w-[380px] min-h-[420px] bg-[#222222] border border-[#111111] rounded-lg shadow-2xl flex flex-col select-none overflow-hidden ring-1 ring-white/10"
     >
       {/* 1. Window Header (Draggable) */}
       <div
@@ -304,20 +325,21 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
       </div>
 
       {/* 3. Category Tabs (Art Draw Studio Style) */}
-      <div className="bg-[#262626] border-b border-black flex items-center px-1 gap-1 text-[11px] overflow-x-auto no-scrollbar py-1">
+      <div className="bg-[#262626] border-b border-black grid grid-cols-4 gap-1 px-1.5 py-1.5 text-[11px] shrink-0">
         {categories.map((cat) => {
           const isActive = activeCategory === cat.id;
           return (
             <button
               key={cat.id}
               onClick={() => setActiveCategory(cat.id)}
-              className={`px-2 py-1 rounded whitespace-nowrap text-xs font-medium transition-colors flex items-center gap-1.5 ${
+              title={cat.label}
+              className={`min-w-0 px-1.5 py-1 rounded whitespace-nowrap text-[11px] font-medium transition-colors flex items-center justify-center gap-1 ${
                 isActive
                   ? 'bg-[#4a90e2] text-white font-bold shadow-xs'
                   : 'text-gray-400 hover:text-gray-100 hover:bg-[#333333]'
               }`}
             >
-              <span>{cat.label}</span>
+              <span className="truncate">{cat.label}</span>
               <span
                 className={`text-[9px] px-1 rounded-full ${
                   isActive ? 'bg-black/30 text-white' : 'bg-black/20 text-gray-500'
@@ -331,7 +353,7 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
       </div>
 
       {/* 4. Brush List with Individual Stroke Previews */}
-      <div className="max-h-[380px] min-h-[220px] overflow-y-auto p-2 flex flex-col gap-1.5 bg-[#1b1b1b]">
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col gap-1.5 bg-[#1b1b1b]">
         {filteredBrushes.length === 0 ? (
           <div className="py-12 flex flex-col items-center justify-center text-gray-500 gap-2">
             <Search size={24} className="opacity-40" />
@@ -476,7 +498,7 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
 
       {/* 5. Bottom Quick Size & Action Bar */}
       <div className="bg-[#242424] p-2.5 border-t border-black flex flex-col gap-2">
-        <div className="flex items-center justify-between text-[10px]">
+        <div className="flex items-center justify-between gap-2 text-[10px]">
           <div className="flex items-center gap-1 text-gray-300">
             <span>Quick Size:</span>
             <div className="flex items-center gap-1">
@@ -496,18 +518,33 @@ export const DesktopBrushSelectionMenu: React.FC<DesktopBrushSelectionMenuProps>
             </div>
           </div>
 
-          {onOpenSettingsPanel && (
-            <button
-              onClick={() => {
-                onOpenSettingsPanel();
-                if (!isPinned) onClose();
-              }}
-              className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-[10px]"
-            >
-              <Sliders size={11} />
-              <span>Full Dynamics</span>
-            </button>
-          )}
+          <div className="flex items-center gap-3 shrink-0">
+            {onOpenStylusSettings && (
+              <button
+                onClick={() => {
+                  onOpenStylusSettings();
+                  if (!isPinned) onClose();
+                }}
+                className="flex items-center gap-1 text-indigo-300 hover:text-indigo-200 text-[10px]"
+                title="Open touch and stylus digitizer settings"
+              >
+                <PenTool size={11} />
+                <span>Stylus / Digitizer</span>
+              </button>
+            )}
+            {onOpenSettingsPanel && (
+              <button
+                onClick={() => {
+                  onOpenSettingsPanel();
+                  if (!isPinned) onClose();
+                }}
+                className="flex items-center gap-1 text-blue-400 hover:text-blue-300 text-[10px]"
+              >
+                <Sliders size={11} />
+                <span>Full Dynamics</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
